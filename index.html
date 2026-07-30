@@ -1,255 +1,144 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sydney Pilot Workshop · KenEyeCue</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif;
-      background: #0a0a0a;
-      color: #e0dcd0;
-      line-height: 1.7;
-    }
-    .container { max-width: 680px; margin: 0 auto; padding: 48px 24px 80px; }
-    .badge {
-      display: inline-block;
-      border: 1px solid #c9a84c;
-      color: #c9a84c;
-      font-size: 12px;
-      letter-spacing: 2px;
-      padding: 4px 12px;
-      text-transform: uppercase;
-      margin-bottom: 24px;
-    }
-    h1 {
-      font-size: 32px;
-      font-weight: 600;
-      letter-spacing: -0.5px;
-      line-height: 1.3;
-      margin-bottom: 12px;
-      color: #f5efe0;
-    }
-    h1 span { color: #c9a84c; }
-    .subtitle {
-      font-size: 16px;
-      color: #a09888;
-      margin-bottom: 48px;
-    }
-    .section {
-      border-top: 1px solid #1e1e1e;
-      padding: 32px 0;
-    }
-    .section:last-of-type { border-bottom: 1px solid #1e1e1e; }
-    h2 {
-      font-size: 14px;
-      font-weight: 600;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      color: #c9a84c;
-      margin-bottom: 12px;
-    }
-    p, li { font-size: 15px; color: #c8c0b0; }
-    ul { padding-left: 20px; }
-    li { margin-bottom: 8px; }
-    .highlight {
-      background: #141410;
-      border-left: 3px solid #c9a84c;
-      padding: 16px 20px;
-      margin: 20px 0;
-      font-size: 14px;
-      color: #d8d0c0;
-    }
-    .not-included {
-      background: #100e0a;
-      border: 1px solid #2a2210;
-      padding: 16px 20px;
-      margin: 20px 0;
-    }
-    .not-included h3 {
-      font-size: 13px;
-      color: #887a60;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      margin-bottom: 8px;
-    }
-    .not-included ul { list-style: none; padding: 0; }
-    .not-included li::before { content: "✕ "; color: #665530; }
-    .form-group {
-      margin-bottom: 20px;
-    }
-    label {
-      display: block;
-      font-size: 13px;
-      color: #a09888;
-      margin-bottom: 6px;
-    }
-    input, textarea, select {
-      width: 100%;
-      background: #141410;
-      border: 1px solid #2a2a20;
-      color: #e0dcd0;
-      padding: 12px 14px;
-      font-size: 15px;
-      border-radius: 0;
-      font-family: inherit;
-    }
-    input:focus, textarea:focus, select:focus {
-      outline: none;
-      border-color: #c9a84c;
-    }
-    textarea { resize: vertical; min-height: 80px; }
-    button {
-      width: 100%;
-      background: #c9a84c;
-      color: #0a0a0a;
-      border: none;
-      padding: 14px;
-      font-size: 15px;
-      font-weight: 600;
-      letter-spacing: 1px;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    button:hover { background: #dbb85c; }
-    .footnote {
-      font-size: 12px;
-      color: #605848;
-      margin-top: 12px;
-      text-align: center;
-    }
-    .footer {
-      margin-top: 48px;
-      text-align: center;
-      font-size: 12px;
-      color: #504840;
-    }
-    @media (max-width: 480px) {
-      .container { padding: 32px 16px 60px; }
-      h1 { font-size: 26px; }
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KenEyeCue 雪梨 · 第一印象判读入门工作坊</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #fafaf5; color: #1a1a1a; line-height: 1.7; }
+.container { max-width: 720px; margin: 0 auto; padding: 40px 24px; }
+h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.5px; }
+.subtitle { font-size: 16px; color: #666; margin-bottom: 40px; }
+.section { margin-bottom: 48px; }
+.section h2 { font-size: 20px; font-weight: 600; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #1a1a1a; }
+.card { background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 24px; margin-bottom: 16px; }
+.card h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+.card p { font-size: 14px; color: #444; margin-bottom: 4px; }
+.tag { display: inline-block; background: #1a1a1a; color: #fff; font-size: 12px; padding: 2px 10px; border-radius: 4px; margin-right: 6px; }
+.price { font-size: 24px; font-weight: 700; color: #1a1a1a; }
+.price small { font-size: 14px; font-weight: 400; color: #888; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.btn { display: inline-block; background: #1a1a1a; color: #fff; padding: 14px 32px; border-radius: 6px; text-decoration: none; font-size: 16px; font-weight: 500; text-align: center; border: none; cursor: pointer; width: 100%; }
+.btn:hover { background: #333; }
+.btn-outline { background: transparent; color: #1a1a1a; border: 1px solid #1a1a1a; }
+.btn-outline:hover { background: #f0f0f0; }
+.cta-box { background: #1a1a1a; color: #fff; border-radius: 12px; padding: 32px; text-align: center; margin-top: 24px; }
+.cta-box h2 { color: #fff; border: none; font-size: 22px; }
+.cta-box p { color: #ccc; margin-bottom: 20px; }
+.cta-box .btn { background: #fff; color: #1a1a1a; max-width: 300px; margin: 0 auto; }
+.cta-box .btn:hover { background: #e5e5e5; }
+.checklist { list-style: none; }
+.checklist li { padding: 6px 0; font-size: 14px; }
+.checklist li::before { content: "✓ "; color: #1a1a1a; font-weight: 700; }
+.note { font-size: 13px; color: #999; margin-top: 8px; }
+.schedule-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.schedule-table th { text-align: left; padding: 10px 12px; background: #f5f5f0; border-bottom: 1px solid #e5e5e5; font-weight: 600; }
+.schedule-table td { padding: 10px 12px; border-bottom: 1px solid #e5e5e5; }
+.schedule-table tr:last-child td { border: none; }
+.faq-item { border-bottom: 1px solid #e5e5e5; padding: 16px 0; }
+.faq-item:last-child { border: none; }
+.faq-q { font-weight: 600; font-size: 15px; margin-bottom: 4px; }
+.faq-a { font-size: 14px; color: #555; }
+@media (max-width: 600px) { .grid-2 { grid-template-columns: 1fr; } .container { padding: 24px 16px; } }
+</style>
 </head>
 <body>
-  <div class="container">
-    <div class="badge">Sydney · Pilot Workshop</div>
-    <h1>你會做眉，但能不能讓顧客<br>聽懂<span>為什麼這樣做？</span></h1>
-    <p class="subtitle">一堂不講命理、不賣認證、不承諾結果的眉眼判讀工作坊。<br>KenEyeCue 創辦人 Ken 親自帶領。</p>
+<div class="container">
 
-    <div class="section">
-      <h2>這不是一堂眉型技術課</h2>
-      <p>你已經會做眉了。這堂課解決的是另一個問題：</p>
-      <ul>
-        <li>顧客做完不滿意，但說不出哪裡不對</li>
-        <li>你覺得很自然，對方覺得太兇／太累／太隨便</li>
-        <li>你知道問題在哪，但說出來顧客聽不懂</li>
-      </ul>
-      <p>核心能力只有一項：<strong>觀察眉眼，找出主要誤讀訊號，並向顧客說明一項有理由、可執行的調整方向。</strong></p>
-    </div>
+<h1>KenEyeCue 第一印象判读</h1>
+<p class="subtitle">雪梨 · 入门工作坊 — 3 天学会眉眼信号判读</p>
 
-    <div class="section">
-      <h2>Who it's for</h2>
-      <ul>
-        <li>雪梨華語美業與眉型工作者</li>
-        <li>已有基礎操作能力，想提升顧客溝通與判讀能力</li>
-        <li>願意用 3 小時，換一套可以帶回工作現場的觀察方法</li>
-      </ul>
-    </div>
+<div class="section">
+<h2>这不是一堂化妆课</h2>
+<p style="font-size:15px;color:#444;margin-bottom:16px;">
+你走进一个房间，里面 10 个人。50 毫秒内，他们已经在判断你。<br>
+不是看你的履历，不是听你说话 — 是看你的眉毛。<br><br>
+眉毛是脸部最突出的结构特征。它决定了你的表情基调。<br>
+问题是：你的眉毛在发送什么信号？那是你想发送的吗？
+</p>
+</div>
 
-    <div class="section">
-      <h2>Pilot Format</h2>
-      <ul>
-        <li><strong>小班制</strong> — 每梯最多 4 人，確保 Ken 能逐一複核</li>
-        <li><strong>真人案例練習</strong> — 不是聽講，是實際觀察、判讀、說明</li>
-        <li><strong>Ken 現場修正</strong> — 你說完，他告訴你哪裡可以更準、哪裡可以更簡單</li>
-        <li><strong>課後案例複核</strong> — 帶一張觀察表回去，下週再回傳一次判讀</li>
-      </ul>
-    </div>
+<div class="section">
+<h2>学完你会什么</h2>
+<div class="grid-2">
+<div class="card"><h3>① 指出信号</h3><p>眉头／眉峰／眉尾的结构观察，不是感觉，是有依据的判断。</p></div>
+<div class="card"><h3>② 说出理由</h3><p>为什么这个眉型给人这种感觉？你能清楚说出判断逻辑。</p></div>
+<div class="card"><h3>③ 提出方向</h3><p>如果要校准，调哪里、怎么调、预期效果是什么。</p></div>
+<div class="card"><h3>④ 真人验证</h3><p>课程结束提交一个案例，Ken 亲自复核回馈。</p></div>
+</div>
+</div>
 
-    <div class="section">
-      <h2>What you'll walk away with</h2>
-      <ul>
-        <li>一套眉眼觀察流程（眉頭／眉峰／眉尾）</li>
-        <li>五類常見誤讀訊號的辨識方法</li>
-        <li>三種顧客聽得懂的調整說明句型</li>
-        <li>一份可重複使用的觀察表</li>
-      </ul>
-    </div>
+<div class="section">
+<h2>课程结构</h2>
+<table class="schedule-table">
+<tr><th>天</th><th>主题</th><th>核心能力</th></tr>
+<tr><td>Day 1</td><td>眉眼基础结构</td><td>指出眉头/眉峰/眉尾的位置与关系</td></tr>
+<tr><td>Day 2</td><td>信号判读系统</td><td>说出三种眉型各自发送什么信号</td></tr>
+<tr><td>Day 3</td><td>案例实战与校准</td><td>对真人照片提出校准方向</td></tr>
+</table>
+</div>
 
-    <div class="not-included">
-      <h3>This workshop is NOT</h3>
-      <ul>
-        <li>紫微斗數課程</li>
-        <li>十四主星認證</li>
-        <li>講師資格培訓</li>
-        <li>品牌授權</li>
-        <li>命運預測</li>
-        <li>真人飄眉實作</li>
-      </ul>
-    </div>
+<div class="section">
+<h2>场次与价格</h2>
+<table class="schedule-table">
+<tr><th>场次</th><th>日期</th><th>价格</th><th>名额</th></tr>
+<tr><td>免费说明会</td><td>8/27（四）14:00</td><td>免费</td><td>30-50 人</td></tr>
+<tr><td>L1 入门工作坊</td><td>9/12（六）14:00-17:00</td><td><strong>AUD $150</strong></td><td>4 人</td></tr>
+<tr><td>L2 实战班</td><td>9/26（六）10:00-16:00</td><td><strong>AUD $350</strong></td><td>4 人</td></tr>
+<tr><td>L1 入门工作坊</td><td>10/10（六）14:00-17:00</td><td><strong>AUD $150</strong></td><td>4 人</td></tr>
+<tr><td>L3 闭门会</td><td>10/24（六）10:00-16:00</td><td><strong>AUD $800</strong></td><td>4 人</td></tr>
+<tr><td>L2 实战班</td><td>11/7（六）10:00-16:00</td><td><strong>AUD $350</strong></td><td>4 人</td></tr>
+</table>
+<p class="note">每梯最多 4 人，小班制确保每人都有个人回馈时间。</p>
+</div>
 
-    <div class="section">
-      <h2>Details (TBC)</h2>
-      <p>日期、場地、語言、時數與售價確認中。<br>Pilot 場預計 3 小時，以華語進行，輔以中英雙語講義。</p>
-    </div>
+<div class="section">
+<h2>课程包含</h2>
+<ul class="checklist">
+<li>一张眉眼观察表（可重复使用）</li>
+<li>三组真人案例练习</li>
+<li>一次现场修正回馈</li>
+<li>一次课后案例提交与 Ken 复核</li>
+<li>后续课程优先参与资格</li>
+</ul>
+<p class="note" style="margin-top:12px;">不包含：讲师认证、品牌授权、对外使用 KenEyeCue 名称的资格。</p>
+</div>
 
-    <div class="section" style="border-bottom: none; padding-bottom: 16px;">
-      <h2>Join the Interest List</h2>
-      <p style="margin-bottom: 20px;">填寫以下 5 題，我會優先通知你 Pilot 場資訊。</p>
-      <form id="interestForm">
-        <div class="form-group">
-          <label>姓名 / Name *</label>
-          <input type="text" id="name" required />
-        </div>
-        <div class="form-group">
-          <label>Email *</label>
-          <input type="email" id="email" required />
-        </div>
-        <div class="form-group">
-          <label>你目前的主要工作 *</label>
-          <select id="role" required>
-            <option value="">請選擇</option>
-            <option value="眉型師">眉型師</option>
-            <option value="美業從業者">美業從業者（紋繡／美容／其他）</option>
-            <option value="一般專業人士">一般專業人士（非美業）</option>
-            <option value="其他">其他</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>你覺得顧客最常誤讀你什麼？</label>
-          <textarea id="misread" placeholder="例如：常被說看起來很累，但我明明精神很好…"></textarea>
-        </div>
-        <div class="form-group">
-          <label>學完這堂課，你最想帶走的一項能力是什麼？</label>
-          <textarea id="expect" placeholder="例如：能說出顧客為什麼不滿意，而不是只會重做"></textarea>
-        </div>
-        <button type="submit">送出意向登記</button>
-      </form>
-      <p class="footnote">你的資料僅用於 Sydney Pilot Workshop 通知，不會用於其他用途。</p>
-    </div>
+<div class="section">
+<h2>常见问题</h2>
+<div class="faq-item">
+<div class="faq-q">需要美术基础吗？</div>
+<div class="faq-a">不需要。课程教的是观察和判断，不是画眉技术。</div>
+</div>
+<div class="faq-item">
+<div class="faq-q">学完可以帮别人看吗？</div>
+<div class="faq-a">可以。但不能以 KenEyeCue 名义对外收费服务。本课程不提供讲师认证或品牌授权。</div>
+</div>
+<div class="faq-item">
+<div class="faq-q">一次校准能维持多久？</div>
+<div class="faq-a">修眉约 2-4 周，画眉每天，雾眉/飘眉 1-3 年。课程教的是判断框架，不是特定技术。</div>
+</div>
+<div class="faq-item">
+<div class="faq-q">不满意可以退费吗？</div>
+<div class="faq-a">第一堂课结束后 24 小时内，若认为课程不符合预期，全额退费。</div>
+</div>
+</div>
 
-    <div class="footer">
-      KenEyeCue · 第一印象眉眼校準<br>
-      Sydney Pilot Workshop · 2026
-    </div>
-  </div>
+<div class="cta-box">
+<h2>想报名或了解更多？</h2>
+<p>联系 Bonnie，她会帮你确认梯次与付款方式。</p>
+<a href="mailto:bonnie@sydney-pilot.com" class="btn">联系 Bonnie 报名</a>
+<p class="note" style="color:#999;margin-top:12px;">或直接微信联系 Bonnie（微信号由 Bonnie 提供）</p>
+</div>
 
-  <script>
-    document.getElementById('interestForm').addEventListener('submit', function(e) {
-      e.preventDefault();
-      const data = {
-        name: document.getElementById('name').value.trim(),
-        email: document.getElementById('email').value.trim(),
-        role: document.getElementById('role').value,
-        misread: document.getElementById('misread').value.trim(),
-        expect: document.getElementById('expect').value.trim()
-      };
-      // 目前僅 console 記錄 — 後續可接 Google Form / Email / Airtable
-      console.log('Interest submission:', data);
-      alert('感謝你的登記！我會在 Pilot 場資訊確認後優先通知你。');
-      this.reset();
-    });
-  </script>
+<div class="section" style="margin-top:32px;">
+<p style="font-size:12px;color:#aaa;text-align:center;">
+KenEyeCue 第一印象判读系统 · 雪梨 Pilot 2026<br>
+以上为课程介绍，不构成对任何具体结果的保证。
+</p>
+</div>
+
+</div>
 </body>
 </html>
