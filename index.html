@@ -134,18 +134,18 @@
 <body>
   <div class="container">
     <div class="badge">Sydney · Pilot Workshop</div>
-    <h1>你會做眉，但能不能讓顧客<br>聽懂<span>為什麼這樣做？</span></h1>
-    <p class="subtitle">一堂不講命理、不賣認證、不承諾結果的眉眼判讀工作坊。<br>KenEyeCue 創辦人 Ken 親自帶領。</p>
+    <h1>你會做眉，但能不能讓顧客<br>聽懂<span>你在校準什麼？</span></h1>
+    <p class="subtitle">一堂不講命理、不賣認證、不承諾結果的眉眼判讀工作坊。<br>不賣安撫，只交付可驗證的判讀方法。KenEyeCue 創辦人 Ken 親自帶領。</p>
 
     <div class="section">
       <h2>這不是一堂眉型技術課</h2>
-      <p>你已經會做眉了。這堂課解決的是另一個問題：</p>
+      <p>你已經會做眉了。這堂課解決的是另一個問題——你做的調整，顧客說不出「為什麼」：</p>
       <ul>
         <li>顧客做完不滿意，但說不出哪裡不對</li>
         <li>你覺得很自然，對方覺得太兇／太累／太隨便</li>
-        <li>你知道問題在哪，但說出來顧客聽不懂</li>
+        <li>你知道問題在哪，但說出來顧客聽不懂，於是你只能用更多解釋去補那個落差</li>
       </ul>
-      <p>核心能力只有一項：<strong>觀察眉眼，找出主要誤讀訊號，並向顧客說明一項有理由、可執行的調整方向。</strong></p>
+      <p>核心能力只有一項：<strong>看懂眉眼結構在傳遞什麼訊號，把它翻譯成顧客聽得懂、你做得到的一項調整——不是憑感覺，是有理由、可執行、可複核。</strong></p>
     </div>
 
     <div class="section">
@@ -155,6 +155,7 @@
         <li>已有基礎操作能力，想提升顧客溝通與判讀能力</li>
         <li>願意用 3 小時，換一套可以帶回工作現場的觀察方法</li>
       </ul>
+      <div class="highlight">眉型不是「修飾」，是別人記住你顧客的方式。KenEyeCue 的判讀方法，看的不是好不好看，是顧客的臉現在傳遞著什麼訊號——這堂課教的是怎麼看懂、怎麼講清楚。</div>
     </div>
 
     <div class="section">
@@ -196,7 +197,7 @@
 
     <div class="section" style="border-bottom: none; padding-bottom: 16px;">
       <h2>Join the Interest List</h2>
-      <p style="margin-bottom: 20px;">填寫以下 5 題，我會優先通知你 Pilot 場資訊。</p>
+      <p style="margin-bottom: 20px;">填寫以下 5 題，資料越具體，Ken 越能針對你的實際狀況調整內容。我會優先通知你 Pilot 場資訊。</p>
       <form id="interestForm">
         <div class="form-group">
           <label>姓名 / Name *</label>
@@ -230,14 +231,20 @@
     </div>
 
     <div class="footer">
-      KenEyeCue · 第一印象眉眼校準<br>
+      KenEyeCue · 不是做眉，是校準視覺權威<br>
       Sydney Pilot Workshop · 2026
     </div>
   </div>
 
   <script>
-    document.getElementById('interestForm').addEventListener('submit', function(e) {
+    const FORMSPREE_ENDPOINT = 'https://formspree.io/f/xlgzwgza';
+
+    const form = document.getElementById('interestForm');
+    const submitBtn = form.querySelector('button[type="submit"]');
+
+    form.addEventListener('submit', async function(e) {
       e.preventDefault();
+
       const data = {
         name: document.getElementById('name').value.trim(),
         email: document.getElementById('email').value.trim(),
@@ -245,10 +252,27 @@
         misread: document.getElementById('misread').value.trim(),
         expect: document.getElementById('expect').value.trim()
       };
-      // 目前僅 console 記錄 — 後續可接 Google Form / Email / Airtable
-      console.log('Interest submission:', data);
-      alert('感謝你的登記！我會在 Pilot 場資訊確認後優先通知你。');
-      this.reset();
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = '送出中…';
+
+      try {
+        const res = await fetch(FORMSPREE_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(data)
+        });
+
+        if (!res.ok) throw new Error('submission failed');
+
+        alert('感謝你的登記！我會在 Pilot 場資訊確認後優先通知你。');
+        form.reset();
+      } catch (err) {
+        alert('送出失敗，請確認網路連線後再試一次，或直接私訊 Ken。');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '送出意向登記';
+      }
     });
   </script>
 </body>
