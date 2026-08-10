@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KenEyeCue 雪梨 · 第一印象判读 快速登记</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #fafaf5; color: #1a1a1a; line-height: 1.7; padding: 40px 20px; }
+.container { max-width: 600px; margin: 0 auto; background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 32px; }
+h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+.subtitle { font-size: 14px; color: #888; margin-bottom: 24px; }
+.form-group { margin-bottom: 20px; }
+label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #333; }
+input, select, textarea { width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 15px; font-family: inherit; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: #1a1a1a; }
+textarea { resize: vertical; min-height: 80px; }
+.btn { width: 100%; padding: 14px; background: #1a1a1a; color: #fff; border: none; border-radius: 6px; font-size: 16px; font-weight: 500; cursor: pointer; }
+.btn:hover { background: #333; }
+.note { font-size: 12px; color: #999; margin-top: 16px; text-align: center; }
+.disclaimer { font-size: 12px; color: #999; background: #f5f5f0; border-radius: 6px; padding: 12px 14px; margin-bottom: 24px; }
+hr { border: none; border-top: 1px solid #eee; margin: 24px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>KenEyeCue 第一印象判读 · 快速登记</h1>
+<p class="subtitle">留下几个问题，Bonnie 会依你的情况建议合适的下一步</p>
+
+<div class="disclaimer">
+⚠️ 这个表单目前还没有串接后端资料库，提交后会请你「复制」一段整理好的资讯，透过 LINE / 微信发给 Bonnie。我们不会假装资料已经自动送到系统里。
+</div>
+
+<form id="interestForm">
+
+<div class="form-group">
+<label>姓名 *</label>
+<input type="text" name="name" required placeholder="你的姓名">
+</div>
+
+<div class="form-group">
+<label>你的职业身份比较接近哪一种？ *</label>
+<select name="occupation" required>
+<option value="">请选择</option>
+<option value="A 创业者/C-level">A　创业者 / C-level</option>
+<option value="B 主管">B　主管</option>
+<option value="C 专业工作者">C　专业工作者</option>
+<option value="其他">其他</option>
+</select>
+</div>
+
+<div class="form-group">
+<label>你目前在哪里？</label>
+<input type="text" name="location" placeholder="例如：雪梨、墨尔本、线上">
+</div>
+
+<div class="form-group">
+<label>关于第一印象，你目前最大的困扰是什么？ *</label>
+<textarea name="concern" required placeholder="简单描述一下，例如：别人常常误会我很凶 / 不够有威严 / 看起来没精神……"></textarea>
+</div>
+
+<div class="form-group">
+<label>联系方式（LINE / 微信 / Email）*</label>
+<input type="text" name="contact" required placeholder="方便 Bonnie 联系你的方式">
+</div>
+
+<button type="submit" class="btn">提交登记</button>
+
+<p class="note">
+提交后请依指示复制资讯发给 Bonnie，她会在 48 小时内回覆你。
+</p>
+
+</form>
+
+</div>
+
+<script>
+document.getElementById('interestForm').addEventListener('submit', function(e) {
+e.preventDefault();
+var formData = new FormData(this);
+var data = {};
+formData.forEach(function(v, k) { data[k] = v; });
+
+var msg = '📋 第一印象判读 · 快速登记\n';
+msg += '姓名：' + (data.name || '未填') + '\n';
+msg += '职业身份：' + (data.occupation || '未选') + '\n';
+msg += '所在地：' + (data.location || '未填') + '\n';
+msg += '第一印象困扰：' + (data.concern || '未填') + '\n';
+msg += '联系方式：' + (data.contact || '未填');
+
+var btn = document.querySelector('.btn');
+btn.textContent = '✅ 已提交！请复制下方资讯发给 Bonnie';
+btn.disabled = true;
+
+var resultDiv = document.createElement('div');
+resultDiv.style.cssText = 'margin-top:20px;padding:16px;background:#f5f5f0;border-radius:6px;font-size:13px;white-space:pre-wrap;word-break:break-all;';
+resultDiv.textContent = msg;
+
+var copyBtn = document.createElement('button');
+copyBtn.textContent = '复制信息发给 Bonnie';
+copyBtn.style.cssText = 'margin-top:8px;padding:8px 16px;background:#fff;border:1px solid #1a1a1a;border-radius:4px;cursor:pointer;font-size:13px;width:100%;';
+copyBtn.onclick = function() {
+navigator.clipboard.writeText(msg).then(function() {
+copyBtn.textContent = '✅ 已复制';
+}).catch(function() {
+copyBtn.textContent = '复制失败，请手动复制上方文字';
+});
+};
+
+document.querySelector('.container').appendChild(resultDiv);
+document.querySelector('.container').appendChild(copyBtn);
+});
+</script>
+
+</body>
+</html>
