@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KenEyeCue 雪梨 · 報名登記</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'PingFang TC', 'Microsoft JhengHei', sans-serif; background: #fafaf5; color: #1a1a1a; line-height: 1.7; padding: 40px 20px; }
+.container { max-width: 600px; margin: 0 auto; background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 32px; }
+h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+.subtitle { font-size: 14px; color: #888; margin-bottom: 24px; }
+.form-group { margin-bottom: 20px; }
+label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #333; }
+input, select, textarea { width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 15px; font-family: inherit; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: #1a1a1a; }
+textarea { resize: vertical; min-height: 80px; }
+.radio-group { margin: 8px 0; }
+.radio-group label { font-weight: 400; display: inline; margin-left: 6px; }
+.radio-item { margin: 6px 0; }
+.btn { width: 100%; padding: 14px; background: #1a1a1a; color: #fff; border: none; border-radius: 6px; font-size: 16px; font-weight: 500; cursor: pointer; }
+.btn:hover { background: #333; }
+.btn:disabled { cursor: wait; opacity: .7; }
+.note { font-size: 12px; color: #777; margin-top: 16px; text-align: center; }
+.status { display: none; margin-top: 16px; padding: 12px 14px; border-radius: 6px; font-size: 14px; }
+.status.success { display: block; background: #eef8ef; color: #205c2a; }
+.status.error { display: block; background: #fff0f0; color: #8a2424; }
+hr { border: none; border-top: 1px solid #eee; margin: 24px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>KenEyeCue 雪梨 · 報名登記</h1>
+<p class="subtitle">填寫後，Bonnie 會與你聯絡，確認梯次與付款方式。</p>
+
+<form id="enrollForm">
+<div class="form-group">
+<label for="name">姓名 *</label>
+<input type="text" id="name" name="name" required autocomplete="name" placeholder="你的姓名">
+</div>
+
+<div class="form-group">
+<label for="contact">微信／LINE</label>
+<input type="text" id="contact" name="contact" placeholder="你的聯絡方式">
+</div>
+
+<div class="form-group">
+<label for="email">Email *</label>
+<input type="email" id="email" name="email" required autocomplete="email" placeholder="your@email.com">
+</div>
+
+<div class="form-group">
+<label for="phone">電話</label>
+<input type="tel" id="phone" name="phone" autocomplete="tel" placeholder="選填">
+</div>
+
+<hr>
+
+<div class="form-group">
+<label for="session">你想報名哪個場次？ *</label>
+<select id="session" name="session" required>
+<option value="">請選擇</option>
+<option value="free">免費說明會 8/27（四）14:00–17:00 — 免費</option>
+<option value="l1-sep">L1 入門工作坊 9/12（六）14:00–17:00 — AUD $150</option>
+<option value="l2-sep">L2 實戰班 9/26（六）10:00–16:00 — AUD $350</option>
+<option value="l1-oct">L1 入門工作坊 10/10（六）14:00–17:00 — AUD $150</option>
+<option value="l3">L3 閉門會 10/24（六）10:00–16:00 — AUD $800</option>
+<option value="l2-nov">L2 實戰班 11/7（六）10:00–16:00 — AUD $350</option>
+<option value="unsure">還不確定，想先了解</option>
+</select>
+</div>
+
+<div class="form-group">
+<label for="industry">你目前從事什麼行業？</label>
+<input type="text" id="industry" name="industry" placeholder="例如：美業、形象顧問、其他">
+</div>
+
+<div class="form-group">
+<label for="reason">你為什麼對這個課程感興趣？</label>
+<textarea id="reason" name="reason" placeholder="簡單說明你的想法"></textarea>
+</div>
+
+<hr>
+
+<div class="form-group">
+<label>意向金 AUD $100（可全額退費）</label>
+<p style="font-size:13px;color:#666;margin-bottom:8px;">先付 $100 意向金保留名額；如果最後決定不參加，可全額退費。</p>
+<div class="radio-group">
+<div class="radio-item"><input type="radio" name="deposit" value="yes" id="dep-yes"> <label for="dep-yes">我願意付意向金 $100 保留名額</label></div>
+<div class="radio-item"><input type="radio" name="deposit" value="no" id="dep-no"> <label for="dep-no">我想先了解，之後再決定</label></div>
+</div>
+</div>
+
+<div class="form-group">
+<label for="notes">備註</label>
+<textarea id="notes" name="notes" placeholder="有任何問題或特殊需求，請寫在這裡"></textarea>
+</div>
+
+<input type="hidden" name="source" value="Sydney Pilot Workshop">
+<button type="submit" class="btn">送出報名登記</button>
+<div id="formStatus" class="status" role="status" aria-live="polite"></div>
+
+<p class="note">送出後，Bonnie 會在 48 小時內與你聯絡。<br>你的資料只用於本次課程報名，不會用於其他用途。</p>
+</form>
+</div>
+
+<script>
+const FORMSPREE_ENDPOINT = 'https://formspree.io/f/xlgzwgza';
+const form = document.getElementById('enrollForm');
+const submitButton = form.querySelector('button[type="submit"]');
+const formStatus = document.getElementById('formStatus');
+
+form.addEventListener('submit', async function (event) {
+  event.preventDefault();
+  submitButton.disabled = true;
+  submitButton.textContent = '送出中…';
+  formStatus.className = 'status';
+  formStatus.textContent = '';
+
+  try {
+    const response = await fetch(FORMSPREE_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Accept': 'application/json' },
+      body: new FormData(form)
+    });
+
+    if (!response.ok) throw new Error('Form submission failed');
+
+    form.reset();
+    formStatus.className = 'status success';
+    formStatus.textContent = '登記已送出。Bonnie 會在 48 小時內與你聯絡。';
+  } catch (error) {
+    formStatus.className = 'status error';
+    formStatus.textContent = '目前無法送出，請確認網路後再試一次。你已填寫的資料仍保留在頁面中。';
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = '送出報名登記';
+  }
+});
+</script>
+</body>
+</html>
