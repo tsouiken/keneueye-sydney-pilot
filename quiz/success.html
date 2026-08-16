@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>付款完成 — KenEyeCue</title>
+<link rel="stylesheet" href="quiz.css">
+</head>
+<body>
+<div class="wrap">
+
+  <div class="brand">KenEyeCue</div>
+
+  <div id="status" class="status-box">
+    <div class="status-icon wait">…</div>
+    <h1 class="serif" id="status-title">確認訂單中</h1>
+    <p id="status-desc" class="lead" style="margin-bottom:0">請稍候…</p>
+  </div>
+
+  <div id="next-steps" class="next-steps" style="display:none">
+    <h3>接下來</h3>
+    <ol>
+      <li>我們會在 24 小時內，透過 LINE 聯絡你。</li>
+      <li>請準備一張自然光、無濾鏡、正面平視、眉眼清楚的照片。</li>
+      <li>完成 7 題情境問卷後，報告會在 48 小時內交付。</li>
+    </ol>
+  </div>
+
+  <p class="fineprint">測驗與報告僅供參考，不構成任何保證。</p>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var params = new URLSearchParams(location.search);
+  var orderId = params.get('order') || '';
+
+  var status = document.getElementById('status');
+  var title = document.getElementById('status-title');
+  var desc = document.getElementById('status-desc');
+  var steps = document.getElementById('next-steps');
+
+  function showPaid() {
+    status.querySelector('.status-icon').className = 'status-icon ok';
+    status.querySelector('.status-icon').textContent = '✓';
+    title.textContent = '付款成功';
+    desc.innerHTML = '你的完整第一印象報告已確認。<br><span class="order-id">訂單編號：' + orderId + '</span>';
+    steps.style.display = 'block';
+  }
+
+  function showPending() {
+    status.querySelector('.status-icon').textContent = '…';
+    title.textContent = '等待付款確認';
+    desc.textContent = '付款完成後，此頁會自動更新。';
+  }
+
+  function check() {
+    if (!orderId) { showPending(); return; }
+    fetch('/api/order/' + encodeURIComponent(orderId))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.status === 'paid') { showPaid(); return; }
+        showPending();
+        setTimeout(check, 3000);
+      })
+      .catch(function () { setTimeout(check, 5000); });
+  }
+
+  check();
+})();
+</script>
+</body>
+</html>
