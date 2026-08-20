@@ -40,8 +40,21 @@ const ECPAY = {
 };
 const DEMO = !(ECPAY.merchantId && ECPAY.hashKey && ECPAY.hashIV);
 
+// ---------- 交付流程：7 題情境問卷（第一印象／誤讀／眉眼） ----------
+const QUESTIONNAIRE = [
+  { id: 'q1', text: '第一次見面，你通常會被怎麼形容？', options: ['很親切、很好聊', '很專業、有距離', '很累、沒精神', '很活潑、很會講', '很安靜、很難捉摸'] },
+  { id: 'q2', text: '在重要場合（面試／提案／聚會），你最常擔心別人怎麼看你？', options: ['怕被覺得不夠專業', '怕被覺得太兇、不好親近', '怕被覺得沒精神、不可靠', '怕被覺得太油、不夠真誠', '怕被覺得太軟、沒份量'] },
+  { id: 'q3', text: '別人對你的評價，哪一種最常出現、也最困擾你？', options: ['「你好像很嚴肅」', '「你看起來很累」', '「你好像沒自信」', '「你太衝了」', '「你讓人摸不透」'] },
+  { id: 'q4', text: '你希望別人第一次見到你，記住你什麼？', options: ['我的專業能力', '我的親和力', '我的活力與熱情', '我的可靠與穩重', '我的溫度與彈性'] },
+  { id: 'q5', text: '你覺得自己「實際上是什麼樣的人」？', options: ['其實很溫暖，只是看起來冷', '其實很有活力，只是看起來累', '其實很有料，只是看起來軟', '其實很細膩，只是看起來粗', '其實很單純，只是看起來複雜'] },
+  { id: 'q6', text: '你最近一次覺得「被別人誤讀了」是什麼情境？', options: ['工作提案／面試', '社交聚會／認識新朋友', '感情／親密關係', '家庭／長輩', '沒有特別感覺'] },
+  { id: 'q7', text: '如果可以改善一件事，你最想讓別人的第一印象變成？', options: ['更有親和力', '更有專業份量', '更有精神狀態', '更有溫度與彈性', '更有可靠度'] }
+];
+
 // ---------- 訂單儲存（記憶體 + JSON 檔，重啟不丟） ----------
 const ORDERS_FILE = path.join(ROOT, 'orders.json');
+const UPLOAD_DIR = path.join(ROOT, 'uploads');
+try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (_) {}
 let orders = {};
 try { orders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf8')); } catch (_) { /* 首次啟動無檔 */ }
 
@@ -118,6 +131,62 @@ const server = http.createServer(async (req, res) => {
     // API
     if (p === '/api/health') {
       return sendJson(res, 200, { ok: true, demo: DEMO, price: PRICE });
+    }
+
+    // 交付流程 API
+    if (p === '/api/questionnaire' && req.method === 'GET') {
+      return sendJson(res, 200, { questions: QUESTIONNAIRE });
+    }
+
+    if (p === '/api/delivery' && req.method === 'POST') {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const order = orders[body.orderId];
+      if (!order) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
+      if (order.status !== 'paid') return sendJson(res, 400, { ok: false, error: '訂單尚未付款' });
+      const answersRaw = body.answers || {};
+      const answers = {};
+      let ok = true;
+      QUESTIONNAIRE.forEach((q) => {
+        const v = answersRaw[q.id];
+        if (v == null || v === '') { ok = false; return; }
+        answers[q.id] = String(v);
+      });
+      if (!ok) return sendJson(res, 400, { ok: false, error: '請完成全部 7 題' });
+      order.answers = answers;
+      order.answersSubmittedAt = new Date().toISOString();
+      saveOrders();
+      return sendJson(res, 200, { ok: true, orderId: order.id });
+    }
+
+    if (p === '/api/upload-photo' && req.method === 'POST') {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const order = orders[body.orderId];
+      if (!order) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
+      if (order.status !== 'paid') return sendJson(res, 400, { ok: false, error: '訂單尚未付款' });
+      const data = body.photo; // data URL 或 base64
+      if (typeof data !== 'string' || data.length < 100) return sendJson(res, 400, { ok: false, error: '照片資料無效' });
+      const m = data.match(/^data:(image\/\w+);base64,(.+)$/);
+      if (!m) return sendJson(res, 400, { ok: false, error: '僅支援 data URL 照片' });
+      const ext = m[1] === 'image/png' ? 'png' : 'jpg';
+      const fname = `photo-${order.id}.${ext}`;
+      fs.writeFileSync(path.join(UPLOAD_DIR, fname), Buffer.from(m[2], 'base64'));
+      order.photo = '/uploads/' + fname;
+      order.photoSubmittedAt = new Date().toISOString();
+      saveOrders();
+      return sendJson(res, 200, { ok: true, photo: order.photo, orderId: order.id });
+    }
+
+    if (p === '/api/report' && req.method === 'GET') {
+      const order = orders[new URLSearchParams(u.search).get('order') || ''];
+      if (!order) return sendJson(res, 404, { error: '訂單不存在' });
+      return sendJson(res, 200, {
+        orderId: order.id,
+        status: order.status,
+        answers: order.answers || null,
+        photo: order.photo || null,
+        // ⚠️ 待接：AI 報告生成（目前為人工交付；此處僅回傳已收集的資料）
+        reportReady: !!(order.answers && order.photo)
+      });
     }
 
     if (p === '/api/order' && req.method === 'POST') {
