@@ -21,6 +21,14 @@ const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
 
+// 輕量 .env 載入（零依賴）：本機開發用，Railway 用平台 env 覆蓋
+try {
+  for (const line of fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split('\n')) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+  }
+} catch (_) {}
+
 const ecpay = require('./lib/ecpay');
 
 const PORT = process.env.PORT || 3000;
@@ -36,9 +44,24 @@ const ECPAY = {
   hashKey: process.env.ECPAY_HASH_KEY || '',
   hashIV: process.env.ECPAY_HASH_IV || '',
   alg: (process.env.ECPAY_HASH_ALG || 'sha256').toLowerCase() === 'md5' ? 'md5' : 'sha256',
-  action: process.env.ECPAY_ACTION_URL || ecpay.DEFAULT_ACTION
+  action: process.env.ECPAY_ACTION_URL || ecpay.DEFAULT_ACTION,
+  choosePayment: process.env.ECPAY_CHOOSE_PAYMENT || 'Credit'
 };
 const DEMO = !(ECPAY.merchantId && ECPAY.hashKey && ECPAY.hashIV);
+
+// Make 自動化 Webhook（留空 = 不發送，不影響既有流程）
+const MAKE_WEBHOOK_URL = process.env.MAKE_WEBHOOK_URL || '';
+function fireWebhook(event, payload) {
+  if (!MAKE_WEBHOOK_URL) return;
+  const body = JSON.stringify({ event, ...payload, sentAt: new Date().toISOString() });
+  const req = http.request(MAKE_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+  }, (res) => { res.resume(); });
+  req.setTimeout(8000, () => req.destroy());
+  req.on('error', () => { /* webhook 失敗不阻斷付款流程 */ });
+  req.end(body);
+}
 
 // ---------- 交付流程：7 題情境問卷（第一印象／誤讀／眉眼） ----------
 const QUESTIONNAIRE = [
@@ -52,8 +75,10 @@ const QUESTIONNAIRE = [
 ];
 
 // ---------- 訂單儲存（記憶體 + JSON 檔，重啟不丟） ----------
-const ORDERS_FILE = path.join(ROOT, 'orders.json');
-const UPLOAD_DIR = path.join(ROOT, 'uploads');
+// DATA_DIR 指向持久磁碟（Railway volume 掛載點）；未設定時退回專案根目錄
+const DATA_DIR = process.env.DATA_DIR || ROOT;
+const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
+const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (_) {}
 let orders = {};
 try { orders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf8')); } catch (_) { /* 首次啟動無檔 */ }
@@ -74,6 +99,7 @@ function createOrder(result) {
     createdAt: new Date().toISOString()
   };
   saveOrders();
+  fireWebhook('order.created', { orderId: id, result: result || '', amount: PRICE });
   return orders[id];
 }
 
@@ -92,12 +118,21 @@ const MIME = {
 
 function serveStatic(req, res, pathname) {
   let rel;
-  if (pathname === '/' || pathname === '') rel = 'index.html';
-  else if (pathname === '/quiz' || pathname === '/quiz/') rel = path.join('quiz', 'index.html');
-  else rel = pathname.replace(/^\/+/, '');
+  let base = ROOT;
+  // 上傳的照片存在持久磁碟（DATA_DIR/uploads），URL /uploads/* 需從那讀
+  if (pathname.startsWith('/uploads/')) {
+    base = DATA_DIR;
+    rel = pathname.replace(/^\/+/, '');
+  } else if (pathname === '/' || pathname === '') {
+    rel = 'index.html';
+  } else if (pathname === '/quiz' || pathname === '/quiz/') {
+    rel = path.join('quiz', 'index.html');
+  } else {
+    rel = pathname.replace(/^\/+/, '');
+  }
 
-  const file = path.resolve(ROOT, rel);
-  if (!file.startsWith(ROOT + path.sep) && file !== ROOT) {
+  const file = path.resolve(base, rel);
+  if (!file.startsWith(base + path.sep) && file !== base) {
     res.writeHead(403); res.end('Forbidden'); return;
   }
   fs.readFile(file, (err, data) => {
@@ -205,7 +240,8 @@ const server = http.createServer(async (req, res) => {
         itemName: ITEM_NAME,
         returnUrl: `${BASE_URL}/api/pay-callback`,
         clientBackUrl: `${BASE_URL}/quiz/success.html?order=${order.id}`,
-        alg: ECPAY.alg
+        alg: ECPAY.alg,
+        choosePayment: ECPAY.choosePayment
       });
       params.CheckMacValue = ecpay.checkMacValue(params, ECPAY.hashKey, ECPAY.hashIV, ECPAY.alg);
       return sendJson(res, 200, { demo: false, orderId: order.id, formAction: ECPAY.action, formFields: params });
@@ -229,10 +265,30 @@ const server = http.createServer(async (req, res) => {
         return res.end('0|金額不符');
       }
       if (params.RtnCode === '1') {
-        order.status = 'paid';
-        order.paidAt = new Date().toISOString();
-        order.tradeNo = params.TradeNo || '';
-        saveOrders();
+        const vAccount = params.vAccount || '';
+        const paid = !!(params.PaymentDate && params.PaymentDate !== '');
+        if (vAccount && !paid) {
+          // ATM：第一段回傳＝虛擬帳號已產生，尚未轉帳
+          order.status = 'atm_pending';
+          order.bankCode = params.BankCode || '';
+          order.vAccount = params.vAccount;
+          order.expireDate = params.ExpireDate || '';
+          saveOrders();
+          fireWebhook('order.atm_pending', {
+            orderId: order.id, amount: order.amount,
+            bankCode: order.bankCode, vAccount: order.vAccount, expireDate: order.expireDate
+          });
+        } else {
+          // 信用卡即時成功，或 ATM 第二段回傳＝已入帳
+          order.status = 'paid';
+          order.paidAt = new Date().toISOString();
+          order.tradeNo = params.TradeNo || '';
+          saveOrders();
+          fireWebhook('order.paid', {
+            orderId: order.id, amount: order.amount, result: order.result,
+            tradeNo: order.tradeNo, method: vAccount ? 'ATM' : 'Credit'
+          });
+        }
       }
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       return res.end('1|OK');
@@ -246,6 +302,7 @@ const server = http.createServer(async (req, res) => {
       order.paidAt = new Date().toISOString();
       order.tradeNo = 'DEMO-' + order.id;
       saveOrders();
+      fireWebhook('order.paid', { orderId: order.id, amount: order.amount, result: order.result, tradeNo: order.tradeNo, method: 'DEMO' });
       return sendJson(res, 200, { ok: true, orderId: order.id });
     }
 
