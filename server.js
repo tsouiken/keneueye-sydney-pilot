@@ -17,6 +17,7 @@
 'use strict';
 
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
@@ -54,12 +55,32 @@ const MAKE_WEBHOOK_URL = process.env.MAKE_WEBHOOK_URL || '';
 function fireWebhook(event, payload) {
   if (!MAKE_WEBHOOK_URL) return;
   const body = JSON.stringify({ event, ...payload, sentAt: new Date().toISOString() });
-  const req = http.request(MAKE_WEBHOOK_URL, {
+  const lib = MAKE_WEBHOOK_URL.startsWith('https') ? https : http;
+  const req = lib.request(MAKE_WEBHOOK_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
   }, (res) => { res.resume(); });
   req.setTimeout(8000, () => req.destroy());
   req.on('error', () => { /* webhook 失敗不阻斷付款流程 */ });
+  req.end(body);
+}
+
+// LINE 成交通知（用官方帳號 token 直接推給 Ken；留空 = 不發送，不影響既有流程）
+const LINE_ACCESS_TOKEN = process.env.LINE_ACCESS_TOKEN || '';
+const LINE_OWNER_ID = process.env.LINE_OWNER_ID || '';
+function sendLine(text) {
+  if (!LINE_ACCESS_TOKEN || !LINE_OWNER_ID) return;
+  const body = JSON.stringify({ to: LINE_OWNER_ID, messages: [{ type: 'text', text }] });
+  const req = http.request('https://api.line.me/v2/bot/message/push', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + LINE_ACCESS_TOKEN,
+      'Content-Length': Buffer.byteLength(body)
+    }
+  }, (res) => { res.resume(); });
+  req.setTimeout(8000, () => req.destroy());
+  req.on('error', () => { /* LINE 通知失敗不阻斷付款流程 */ });
   req.end(body);
 }
 
@@ -278,6 +299,7 @@ const server = http.createServer(async (req, res) => {
             orderId: order.id, amount: order.amount,
             bankCode: order.bankCode, vAccount: order.vAccount, expireDate: order.expireDate
           });
+          sendLine('【KenEyeCue ATM 待付】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n虛擬帳號：' + order.vAccount + '（' + order.bankCode + '）\n到期：' + order.expireDate + '\n→ 入帳後自動通知你');
         } else {
           // 信用卡即時成功，或 ATM 第二段回傳＝已入帳
           order.status = 'paid';
@@ -288,6 +310,7 @@ const server = http.createServer(async (req, res) => {
             orderId: order.id, amount: order.amount, result: order.result,
             tradeNo: order.tradeNo, method: vAccount ? 'ATM' : 'Credit'
           });
+          sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：' + (vAccount ? 'ATM' : 'Credit') + '\n→ 準備交付（問卷＋照片＋48h 報告）');
         }
       }
       res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -303,6 +326,7 @@ const server = http.createServer(async (req, res) => {
       order.tradeNo = 'DEMO-' + order.id;
       saveOrders();
       fireWebhook('order.paid', { orderId: order.id, amount: order.amount, result: order.result, tradeNo: order.tradeNo, method: 'DEMO' });
+      sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：DEMO\n→ 準備交付（問卷＋照片＋48h 報告）');
       return sendJson(res, 200, { ok: true, orderId: order.id });
     }
 
