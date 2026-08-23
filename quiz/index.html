@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>KenEyeCue 第一印象被低估測驗</title>
+<meta name="description" content="5 題，30 秒。找出你最容易在第一次見面時，被別人誤讀的那一面。不算命、不保證結果。">
+<link rel="stylesheet" href="quiz.css">
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 首頁 -->
+  <section id="screen-intro" class="screen active">
+    <div class="brand">KenEyeCue</div>
+    <div style="height:48px"></div>
+    <p class="kicker">第一印象被低估測驗</p>
+    <h1 class="serif">別人第一眼看到的你，<br>和你真實的樣子，<br>落差在哪？</h1>
+    <p class="lead">5 題，30 秒。找出你最容易在第一次見面時，被別人誤讀的那一面。</p>
+    <button id="btn-start" class="btn btn-gold">開始測驗</button>
+    <p class="fineprint">不算命、不保證結果，也不是叫你換眉型。</p>
+  </section>
+
+  <!-- 作答 -->
+  <section id="screen-quiz" class="screen">
+    <div class="progress-row"><span id="q-num">1</span><span>/ 5</span></div>
+    <div class="bar"><div id="bar-fill" class="bar-fill" style="width:20%"></div></div>
+    <h2 id="q-text" class="serif"></h2>
+    <div style="height:24px"></div>
+    <div id="q-options"></div>
+    <div class="quiz-actions">
+      <button id="btn-back" class="btn btn-ghost">上一題</button>
+      <button id="btn-next" class="btn" disabled>下一題</button>
+    </div>
+  </section>
+
+  <!-- 結果 -->
+  <section id="screen-result" class="screen">
+    <div class="brand">KenEyeCue</div>
+    <div style="height:40px"></div>
+    <div class="result-mark">✦</div>
+    <p class="kicker">你的測驗結果</p>
+    <p id="result-line" class="result-line serif"></p>
+    <p id="result-desc" class="result-desc"></p>
+    <div id="result-note" class="result-note"></div>
+    <a id="btn-unlock" class="btn btn-gold" href="checkout.html">解鎖完整第一印象報告 NT$499</a>
+    <p class="fineprint">測驗僅供參考，不構成任何保證。</p>
+  </section>
+
+</div>
+
+<script src="quiz-logic.js"></script>
+<script>
+(function () {
+  'use strict';
+  var Q = QuizLogic.QUESTIONS;
+  var answers = [];
+  var step = 0;
+  var selected = null;
+
+  var screens = {
+    intro: document.getElementById('screen-intro'),
+    quiz: document.getElementById('screen-quiz'),
+    result: document.getElementById('screen-result')
+  };
+
+  function show(name) {
+    Object.keys(screens).forEach(function (k) {
+      screens[k].classList.toggle('active', k === name);
+    });
+    window.scrollTo(0, 0);
+  }
+
+  function renderQuestion() {
+    var q = Q[step];
+    document.getElementById('q-num').textContent = step + 1;
+    document.getElementById('bar-fill').style.width = ((step + 1) / Q.length * 100) + '%';
+    document.getElementById('q-text').textContent = q.text;
+    document.getElementById('btn-back').style.visibility = step === 0 ? 'hidden' : 'visible';
+    document.getElementById('btn-next').disabled = true;
+    selected = null;
+
+    var box = document.getElementById('q-options');
+    box.innerHTML = '';
+    q.options.forEach(function (opt, i) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'option';
+      b.textContent = opt.label;
+      b.addEventListener('click', function () {
+        selectOption(i);
+      });
+      box.appendChild(b);
+    });
+  }
+
+  function selectOption(i) {
+    selected = i;
+    var opts = document.querySelectorAll('#q-options .option');
+    opts.forEach(function (el, idx) {
+      el.classList.toggle('selected', idx === i);
+    });
+    document.getElementById('btn-next').disabled = false;
+  }
+
+  function finish() {
+    var r = QuizLogic.score(answers);
+    document.getElementById('result-line').textContent = r.line;
+    document.getElementById('result-desc').textContent = r.desc;
+    document.getElementById('result-note').textContent = r.note;
+    document.getElementById('btn-unlock').href = 'checkout.html?r=' + r.dim;
+    show('result');
+  }
+
+  document.getElementById('btn-start').addEventListener('click', function () {
+    step = 0;
+    answers = [];
+    renderQuestion();
+    show('quiz');
+  });
+
+  document.getElementById('btn-next').addEventListener('click', function () {
+    if (selected === null) return;
+    answers.push(Q[step].options[selected].dim);
+    step += 1;
+    if (step >= Q.length) { finish(); return; }
+    renderQuestion();
+  });
+
+  document.getElementById('btn-back').addEventListener('click', function () {
+    if (step === 0) return;
+    step -= 1;
+    answers.pop();
+    renderQuestion();
+  });
+})();
+</script>
+</body>
+</html>

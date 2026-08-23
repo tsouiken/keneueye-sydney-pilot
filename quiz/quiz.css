@@ -1,0 +1,309 @@
+/* KenEyeCue 測驗 MVP — 品牌樣式
+   深炭黑 / 象牙白 / 暖金，精品、清楚、乾淨，行動裝置優先 */
+:root {
+  --ink: #1c1c1c;
+  --paper: #faf8f2;
+  --gold: #c9a24b;
+  --gold-deep: #a8842f;
+  --muted: #8a8578;
+  --line: #e6e1d3;
+  --card: #ffffff;
+  --ok: #3d7a4f;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang TC", "Microsoft JhengHei", "Helvetica Neue", sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  line-height: 1.75;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.serif {
+  font-family: "Songti TC", "Noto Serif TC", "Times New Roman", serif;
+}
+
+.wrap {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 40px 24px 64px;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- 品牌標 ---------- */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink);
+  font-weight: 600;
+}
+.brand::before {
+  content: "";
+  width: 22px;
+  height: 1px;
+  background: var(--gold);
+  display: inline-block;
+}
+
+.kicker {
+  font-size: 12px;
+  letter-spacing: 0.28em;
+  color: var(--gold-deep);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+/* ---------- 標題與內文 ---------- */
+h1 {
+  font-size: 30px;
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-bottom: 18px;
+}
+
+h2 {
+  font-size: 22px;
+  line-height: 1.5;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.lead {
+  font-size: 16px;
+  color: #4a463c;
+  margin-bottom: 32px;
+}
+
+.fineprint {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 20px;
+  text-align: center;
+}
+
+/* ---------- 按鈕 ---------- */
+.btn {
+  display: block;
+  width: 100%;
+  background: var(--ink);
+  color: var(--paper);
+  border: 1px solid var(--ink);
+  padding: 16px 24px;
+  border-radius: 4px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+.btn:active { transform: scale(0.985); }
+.btn:hover { background: #000; }
+
+.btn-gold {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #1c1c1c;
+}
+.btn-gold:hover { background: var(--gold-deep); border-color: var(--gold-deep); color: #fff; }
+
+.btn-ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 14px;
+  padding: 12px;
+}
+.btn-ghost:hover { border-color: var(--muted); color: var(--ink); }
+
+.btn[disabled] { opacity: 0.5; pointer-events: none; }
+
+/* ---------- 畫面切換 ---------- */
+.screen { display: none; }
+.screen.active { display: block; animation: fade 0.25s ease; }
+@keyframes fade {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- 進度 ---------- */
+.progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+}
+.bar {
+  height: 2px;
+  background: var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 28px;
+}
+.bar-fill {
+  height: 100%;
+  background: var(--gold);
+  transition: width 0.3s ease;
+}
+
+/* ---------- 選項卡片 ---------- */
+.option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px 18px;
+  margin-bottom: 12px;
+  font-size: 15px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.option:hover { border-color: var(--gold); }
+.option.selected {
+  border-color: var(--gold);
+  background: #fbf6ea;
+  box-shadow: inset 0 0 0 1px var(--gold);
+}
+
+.quiz-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+.quiz-actions .btn { flex: 1; }
+
+/* ---------- 結果 ---------- */
+.result-mark {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--gold);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 22px;
+  color: var(--gold-deep);
+  font-size: 18px;
+}
+.result-line {
+  font-size: 24px;
+  line-height: 1.5;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+.result-desc {
+  font-size: 15px;
+  color: #4a463c;
+  margin-bottom: 20px;
+}
+.result-note {
+  background: #f3efe3;
+  border-left: 2px solid var(--gold);
+  padding: 14px 16px;
+  font-size: 13px;
+  color: #5c564a;
+  margin-bottom: 32px;
+  border-radius: 0 4px 4px 0;
+}
+
+/* ---------- 結帳 ---------- */
+.price-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.price-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.price-row .name { font-size: 16px; font-weight: 600; }
+.price-row .price { font-size: 26px; font-weight: 700; }
+.price-row .price small { font-size: 14px; font-weight: 400; color: var(--muted); }
+
+.include-list { list-style: none; }
+.include-list li {
+  display: flex;
+  gap: 10px;
+  font-size: 14px;
+  color: #4a463c;
+  padding: 7px 0;
+  border-top: 1px dashed var(--line);
+}
+.include-list li:first-child { border-top: none; }
+.include-list li::before {
+  content: "—";
+  color: var(--gold);
+  flex-shrink: 0;
+}
+
+.result-recap {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 20px;
+  text-align: center;
+}
+.result-recap strong { color: var(--ink); }
+
+/* ---------- 付款狀態 ---------- */
+.status-box {
+  text-align: center;
+  padding: 40px 0 24px;
+}
+.status-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 20px;
+  font-size: 24px;
+}
+.status-icon.ok { background: #e8f2ea; color: var(--ok); border: 1px solid #cfe3d3; }
+.status-icon.wait { background: #f3efe3; color: var(--gold-deep); border: 1px solid var(--line); }
+
+.order-id {
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  margin-top: 8px;
+}
+
+.next-steps {
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 20px 22px;
+  margin-top: 24px;
+}
+.next-steps h3 { font-size: 15px; margin-bottom: 10px; }
+.next-steps ol { padding-left: 20px; font-size: 14px; color: #4a463c; }
+.next-steps li { margin-bottom: 6px; }
+
+/* ---------- 載入中 ---------- */
+.loading { text-align: center; color: var(--muted); padding: 40px 0; font-size: 14px; }

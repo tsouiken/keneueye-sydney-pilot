@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>解鎖完整第一印象報告 — KenEyeCue</title>
+<meta name="description" content="完整第一印象報告 NT$499：5 層分析、7 題情境問卷、正面照眉眼結構觀察、個人化調整建議。">
+<link rel="stylesheet" href="quiz.css">
+</head>
+<body>
+<div class="wrap">
+
+  <div class="brand">KenEyeCue</div>
+  <div style="height:40px"></div>
+  <p class="kicker">完整第一印象報告</p>
+  <h1 class="serif">把「被誤讀」的那一面，<br>一次看清楚。</h1>
+
+  <div id="recap" class="result-recap"></div>
+
+  <div class="price-card">
+    <div class="price-row">
+      <span class="name">完整第一印象報告</span>
+      <span class="price">NT$499</span>
+    </div>
+    <ul class="include-list">
+      <li>5 層第一印象分析（眉眼結構 × 情境 × 職場 × 社交 × 個人）</li>
+      <li>7 題情境問卷</li>
+      <li>正面照眉眼結構觀察</li>
+      <li>個人化調整建議</li>
+    </ul>
+  </div>
+
+  <button id="btn-pay" class="btn btn-gold">前往付款</button>
+  <p class="fineprint">付款完成後，我們會透過 LINE 聯絡你完成後續步驟。<br>測驗與報告僅供參考，不構成任何保證。</p>
+
+  <div id="demo-box" style="display:none; margin-top:24px;">
+    <div class="result-note" style="margin-bottom:12px">
+      <strong>模擬付款模式</strong>：尚未設定綠界金流，此按鈕僅用於測試完整流程，不會真的扣款。
+    </div>
+    <button id="btn-demo-pay" class="btn">模擬付款成功</button>
+  </div>
+
+  <form id="ecpay-form" method="post" style="display:none"></form>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var params = new URLSearchParams(location.search);
+  var dim = params.get('r') || '';
+  var orderId = null;
+
+  var recap = document.getElementById('recap');
+  if (dim && window.QuizLogic && QuizLogic.RESULTS[dim]) {
+    recap.innerHTML = '你的測驗結果：<strong>' + QuizLogic.RESULTS[dim].title + '</strong> 被低估';
+  } else {
+    recap.innerHTML = '完成測驗後，可在此解鎖你的完整報告。';
+  }
+
+  var btnPay = document.getElementById('btn-pay');
+  var btnDemo = document.getElementById('btn-demo-pay');
+  var demoBox = document.getElementById('demo-box');
+  var ecpayForm = document.getElementById('ecpay-form');
+
+  btnPay.addEventListener('click', function () {
+    btnPay.disabled = true;
+    btnPay.textContent = '建立訂單中…';
+    fetch('/api/order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ result: dim })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        orderId = data.orderId;
+        if (data.demo) {
+          demoBox.style.display = 'block';
+          btnPay.style.display = 'none';
+          return;
+        }
+        // 真實金流：自動送出綠界付款表單
+        ecpayForm.action = data.formAction;
+        Object.keys(data.formFields).forEach(function (k) {
+          var input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = k;
+          input.value = data.formFields[k];
+          ecpayForm.appendChild(input);
+        });
+        ecpayForm.submit();
+      })
+      .catch(function () {
+        btnPay.disabled = false;
+        btnPay.textContent = '前往付款';
+        alert('建立訂單失敗，請稍後再試。');
+      });
+  });
+
+  btnDemo.addEventListener('click', function () {
+    btnDemo.disabled = true;
+    btnDemo.textContent = '確認中…';
+    fetch('/api/demo-pay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderId: orderId })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ok) {
+          location.href = 'success.html?order=' + orderId;
+        } else {
+          alert('模擬付款失敗：' + (data.error || '未知錯誤'));
+          btnDemo.disabled = false;
+          btnDemo.textContent = '模擬付款成功';
+        }
+      })
+      .catch(function () {
+        alert('連線失敗，請稍後再試。');
+        btnDemo.disabled = false;
+        btnDemo.textContent = '模擬付款成功';
+      });
+  });
+})();
+</script>
+</body>
+</html>

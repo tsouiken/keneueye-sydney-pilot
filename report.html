@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#FAF7F2">
+  <title>天命定位報告｜KenEyeCue 份量實驗室</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    :root {
+      --bg: #FAF7F2; --pink: #FDE8E4; --yellow: #FDF3DC;
+      --coral: #FF7F6E; --coral-dark: #F06A58;
+      --brown: #8B6F5E; --ink: #5C4A3D; --white: #fff;
+      --radius: 24px; --shadow: 0 6px 24px rgba(92,74,61,.10);
+    }
+    html, body { background: var(--bg); color: var(--ink); font-family: "Noto Sans TC","PingFang TC",sans-serif; font-size: 16px; line-height: 1.7; }
+    #app { max-width: 560px; margin: 0 auto; min-height: 100vh; padding: 0 20px 40px; }
+
+    .hero { text-align: center; padding: 60px 0 30px; }
+    .owner { font-size: 13px; font-weight: 700; color: var(--coral); letter-spacing: 3px; margin-bottom: 10px; }
+    h1 { font-size: 34px; font-weight: 700; color: var(--brown); line-height: 1.4; }
+    .sub { font-size: 15px; color: var(--ink); opacity: .85; margin: 16px 0 0; }
+
+    .thesis { background: linear-gradient(135deg, var(--coral), #F9C74F); border-radius: var(--radius); padding: 28px 24px; color: #fff; box-shadow: var(--shadow); }
+    .thesis h2 { color: #fff; font-size: 22px; margin-bottom: 10px; }
+    .thesis p { font-size: 15px; opacity: .95; }
+
+    .section { margin: 40px 0; }
+    .section h2 { font-size: 20px; font-weight: 700; color: var(--brown); margin-bottom: 16px; }
+    .card { background: var(--white); border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow); margin-bottom: 14px; }
+    .card h3 { font-size: 16px; font-weight: 700; color: var(--brown); margin-bottom: 6px; }
+    .card p { font-size: 14px; color: var(--ink); opacity: .9; }
+
+    .step { display: flex; gap: 14px; align-items: flex-start; }
+    .step-num { background: var(--coral); color: #fff; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; flex-shrink: 0; }
+    .step h3 { font-size: 16px; font-weight: 700; color: var(--brown); }
+    .step p { font-size: 14px; color: var(--ink); opacity: .9; }
+
+    .btn { display: block; width: 100%; border: none; border-radius: 999px; padding: 16px; font-size: 17px; font-weight: 700; font-family: inherit; background: var(--coral); color: #fff; cursor: pointer; box-shadow: 0 8px 20px rgba(255,127,110,.35); }
+    .btn:active { transform: scale(.98); }
+
+    .form-group { margin-bottom: 18px; }
+    label { display: block; font-size: 14px; font-weight: 700; color: var(--brown); margin-bottom: 6px; }
+    input, select, textarea { width: 100%; padding: 12px 14px; border: 1px solid #E8DDD2; border-radius: 14px; font-size: 15px; font-family: inherit; background: var(--white); color: var(--ink); }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: var(--coral); }
+    textarea { resize: vertical; min-height: 70px; }
+
+    .faq { border-bottom: 1px solid #EFE6DC; padding: 14px 0; }
+    .faq:last-child { border: none; }
+    .faq-q { font-weight: 700; color: var(--brown); font-size: 15px; margin-bottom: 4px; }
+    .faq-a { font-size: 14px; color: var(--ink); opacity: .9; }
+
+    .note { font-size: 12px; color: #B9A99C; text-align: center; margin-top: 24px; }
+    .confirm { margin-top: 20px; padding: 16px; background: var(--yellow); border-radius: 14px; font-size: 13px; white-space: pre-wrap; word-break: break-all; }
+    .copy-btn { margin-top: 8px; padding: 12px; background: var(--white); border: 1px solid var(--brown); border-radius: 999px; cursor: pointer; font-size: 14px; font-weight: 700; color: var(--brown); width: 100%; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="hero">
+      <p class="owner">KenEyeCue 份量實驗室</p>
+      <h1>天命定位報告<br>重新定義你真正的份量</h1>
+      <p class="sub">別人看到的你，和真實的你，落差在哪裡？<br>一份報告，把兩邊都攤開給你看。</p>
+    </div>
+
+    <div class="thesis">
+      <h2>你被低估了，但你自己知道。</h2>
+      <p>你明明有份量，別人卻只看到你的客氣。<br>你明明有主張，別人卻覺得你沒意見。<br><br>不是你不夠好，是別人看到的你，和真實的你，中間隔了一層。<br>這層落差，就是你的份量被藏起來的地方。</p>
+    </div>
+
+    <div class="section">
+      <div class="card">
+        <h3>你來，不是想知道你是誰。</h3>
+        <p>你想知道的是：<strong>你想成為誰。</strong></p>
+        <p style="margin-top:10px;">「我該不該換工作？」——你想問的是：換了，我會不會更好？<br>「我跟他合不合？」——你想問的是：我有沒有值得被好好對待？<br>「我為什麼總覺得孤獨？」——你想問的是：我到底屬於哪裡？</p>
+        <p style="margin-top:10px;">你買的不是一份報告，<br>是一套<strong>重新理解自己、重新定位自己的敘事</strong>。<br>這套敘事，會陪你走很久——比那份報告久得多。</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>這份報告給你什麼</h2>
+      <div class="card"><h3>① 你的真實份量</h3><p>別人看不到的那一面——你的底層運作方式，你真正的樣子。</p></div>
+      <div class="card"><h3>② 你的外在投影</h3><p>別人第一眼看到的你——你發送出去的訊號，別人接收到的印象。</p></div>
+      <div class="card"><h3>③ 落差分析</h3><p>為什麼會被看錯——落差從哪裡來，是哪一面被藏起來了。</p></div>
+      <div class="card"><h3>④ 定位建議</h3><p>怎麼讓別人看到真正的你——具體、可做、針對你一個人的建議。</p></div>
+    </div>
+
+    <div class="section">
+      <h2>怎麼進行</h2>
+      <div class="card">
+        <div class="step"><div class="step-num">1</div><div><h3>預約</h3><p>填下面的表單，Bonnie 會跟你確認時間。</p></div></div>
+      </div>
+      <div class="card">
+        <div class="step"><div class="step-num">2</div><div><h3>提供資料</h3><p>出生年月日時＋地點，和一張清楚的正面照片。</p></div></div>
+      </div>
+      <div class="card">
+        <div class="step"><div class="step-num">3</div><div><h3>收到報告</h3><p>報告＋一對一解讀，Ken 親自講解你的份量定位。</p></div></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>預約天命定位報告</h2>
+      <div class="card" id="book-card">
+        <p style="text-align:center; margin-bottom:18px;"><span style="font-size:24px; font-weight:700; color:var(--brown);">AUD $150</span><br><span style="font-size:13px; color:var(--ink); opacity:.7;">含一對一解讀，約 60 分鐘</span></p>
+        <p style="text-align:center; font-size:13px; color:var(--ink); opacity:.75; margin-bottom:18px;">你買的不是 60 分鐘，<br>是重新定義自己的開始。</p>
+        <form id="bookForm">
+          <div class="form-group"><label>姓名 *</label><input type="text" name="name" required placeholder="你的姓名"></div>
+          <div class="form-group"><label>聯絡方式（微信／LINE／Email）*</label><input type="text" name="contact" required placeholder="怎麼聯絡你"></div>
+          <div class="form-group"><label>出生年月日時＋地點</label><input type="text" name="birth" placeholder="例：1990/3/15 上午10:30，台北"></div>
+          <div class="form-group"><label>想預約的時段</label><select name="time"><option value="">先不選，Bonnie 跟我確認</option><option>平日白天</option><option>平日晚上</option><option>週末</option></select></div>
+          <div class="form-group"><label>備註</label><textarea name="notes" placeholder="想先了解什麼，或任何問題"></textarea></div>
+          <button type="submit" class="btn">送出預約</button>
+        </form>
+        <p class="note" style="margin-top:14px;">送出後把訊息複製傳給 Bonnie（微信）或寄到 hello@keneyecue.com，她會在 48 小時內跟你確認。</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>常見問題</h2>
+      <div class="card">
+        <div class="faq"><div class="faq-q">這是算命嗎？</div><div class="faq-a">不是。這是一個自我觀察與反思模型，幫你看懂「別人眼中的你」和「真實的你」的落差。不是預測，不是保證。</div></div>
+        <div class="faq"><div class="faq-q">需要準備什麼？</div><div class="faq-a">出生年月日時＋地點，和一張清楚的正面照片。</div></div>
+        <div class="faq"><div class="faq-q">報告多久可以拿到？</div><div class="faq-a">預約後 Bonnie 會跟你確認時間，一對一解讀當場交付。</div></div>
+      </div>
+    </div>
+
+    <p class="note">KenEyeCue 份量實驗室 · 2026<br>自我觀察與反思模型，不是診斷工具。不構成對任何具體結果的保證。</p>
+  </div>
+
+  <script>
+    document.getElementById('bookForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      var formData = new FormData(this);
+      var data = {};
+      formData.forEach(function(v, k) { data[k] = v; });
+
+      var msg = '📋 天命定位報告預約\n';
+      msg += '姓名：' + (data.name || '未填') + '\n';
+      msg += '聯絡方式：' + (data.contact || '未填') + '\n';
+      msg += '出生資料：' + (data.birth || '未填') + '\n';
+      msg += '時段：' + (data.time || '未選') + '\n';
+      msg += '備註：' + (data.notes || '無');
+
+      var btn = document.querySelector('#book-card .btn');
+      btn.textContent = '✅ 已送出！Bonnie 會聯繫你';
+      btn.disabled = true;
+
+      var resultDiv = document.createElement('div');
+      resultDiv.className = 'confirm';
+      resultDiv.textContent = msg;
+
+      var copyBtn = document.createElement('button');
+      copyBtn.className = 'copy-btn';
+      copyBtn.textContent = '複製訊息傳給 Bonnie';
+      copyBtn.onclick = function() {
+        navigator.clipboard.writeText(msg).then(function() {
+          copyBtn.textContent = '✅ 已複製';
+        }).catch(function() {
+          copyBtn.textContent = '複製失敗，請手動複製上方文字';
+        });
+      };
+
+      var card = document.getElementById('book-card');
+      card.appendChild(resultDiv);
+      card.appendChild(copyBtn);
+    });
+  </script>
+</body>
+</html>

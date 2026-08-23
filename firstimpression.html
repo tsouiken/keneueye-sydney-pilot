@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#FAF7F2">
+  <title>第一印象猜猜看｜KenEyeCue</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    :root {
+      --bg: #FAF7F2; --pink: #FDE8E4; --yellow: #FDF3DC;
+      --coral: #FF7F6E; --coral-dark: #F06A58;
+      --brown: #8B6F5E; --ink: #5C4A3D; --white: #fff;
+      --radius: 24px; --shadow: 0 6px 24px rgba(92,74,61,.10);
+    }
+    html, body { background: var(--bg); color: var(--ink); font-family: "Noto Sans TC","PingFang TC",sans-serif; font-size: 16px; line-height: 1.6; }
+    #app { max-width: 480px; margin: 0 auto; min-height: 100vh; padding: 0 20px 40px; }
+    .view { display: none; }
+    .view.active { display: block; animation: fade .25s ease; }
+    @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+    .hero { text-align: center; padding: 60px 0 20px; }
+    .owner { font-size: 13px; font-weight: 700; color: var(--coral); letter-spacing: 3px; margin-bottom: 10px; }
+    h1 { font-size: 32px; font-weight: 700; color: var(--brown); line-height: 1.4; }
+    .sub { font-size: 15px; color: var(--ink); opacity: .85; margin: 14px 0 26px; }
+    .btn { display: block; width: 100%; border: none; border-radius: 999px; padding: 16px; font-size: 17px; font-weight: 700; font-family: inherit; background: var(--coral); color: #fff; cursor: pointer; box-shadow: 0 8px 20px rgba(255,127,110,.35); }
+    .btn:active { transform: scale(.98); }
+    .btn.ghost { background: var(--white); color: var(--brown); box-shadow: var(--shadow); margin-top: 12px; }
+    .note { font-size: 12px; color: #B9A99C; margin-top: 20px; text-align: center; }
+
+    .progress { height: 6px; background: #EFE6DC; border-radius: 999px; margin: 24px 0 20px; overflow: hidden; }
+    #bar { height: 100%; background: var(--coral); border-radius: 999px; transition: width .3s; }
+    .qnum { font-size: 13px; font-weight: 700; color: var(--coral); letter-spacing: 1px; margin-bottom: 6px; text-align: center; }
+    .eyebrow-box { background: var(--white); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px; text-align: center; margin-bottom: 18px; }
+    .eyebrow-box svg { width: 100%; max-width: 240px; }
+    .q-text { font-size: 17px; font-weight: 700; color: var(--brown); text-align: center; margin-bottom: 14px; }
+    .opt { background: var(--white); border: 2px solid transparent; border-radius: 20px; padding: 16px 18px; margin-bottom: 12px; box-shadow: var(--shadow); font-size: 15px; color: var(--ink); cursor: pointer; transition: border-color .15s; }
+    .opt:active { transform: scale(.98); }
+    .opt.correct { border-color: #6BA368; background: #EEF6EC; }
+    .opt.wrong { border-color: var(--coral); background: #FFF0EE; }
+    .opt.disabled { pointer-events: none; }
+    .feedback { display: none; background: var(--yellow); border-radius: 16px; padding: 16px; font-size: 14px; margin-top: 4px; margin-bottom: 14px; }
+    .fb-title { font-weight: 700; color: var(--brown); margin-bottom: 4px; }
+
+    .result-wrap { padding-top: 20px; }
+    .score { font-size: 56px; font-weight: 700; text-align: center; color: var(--brown); font-family: 'SF Mono', Menlo, monospace; }
+    .result-label { font-size: 20px; font-weight: 700; text-align: center; margin: 8px 0 12px; }
+    .result-desc { font-size: 15px; color: var(--ink); opacity: .9; text-align: center; margin-bottom: 20px; }
+    .cta { display: block; text-align: center; text-decoration: none; background: var(--brown); color: #fff; border-radius: 999px; padding: 16px; font-size: 16px; font-weight: 700; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+
+    <section id="home" class="view active">
+      <div class="hero">
+        <div class="owner">KenEyeCue 第一印象實驗室</div>
+        <h1>第一印象猜猜看</h1>
+        <p class="sub">你看得出眉毛在說話嗎？<br>5 題，測你的「讀人」直覺。</p>
+        <button class="btn" onclick="start()">開始猜</button>
+        <p class="note">自我觀察與反思模型，不是診斷工具</p>
+      </div>
+    </section>
+
+    <section id="quiz" class="view">
+      <div class="progress"><div id="bar"></div></div>
+      <p id="qnum" class="qnum"></p>
+      <div class="eyebrow-box" id="eyebrow"></div>
+      <p class="q-text">這個眉型，給人什麼第一印象？</p>
+      <div id="options"></div>
+      <div class="feedback" id="feedback">
+        <div class="fb-title" id="fb-title"></div>
+        <div id="fb-lesson"></div>
+      </div>
+      <button class="btn" id="next-btn" onclick="next()" style="display:none;">下一題</button>
+    </section>
+
+    <section id="result" class="view">
+      <div class="result-wrap">
+        <div class="score" id="score"></div>
+        <div class="result-label" id="result-label"></div>
+        <div class="result-desc" id="result-desc"></div>
+        <div class="eyebrow-box" id="final-lesson"></div>
+        <button class="btn ghost" onclick="restart()">再玩一次</button>
+        <a class="cta" href="/enroll.html">想學會怎麼判讀？報名工作坊</a>
+        <p class="note">KenEyeCue 第一印象判讀系統<br>自我觀察與反思模型，不是診斷工具</p>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    const EYE = '<path d="M 70 118 Q 120 132 170 118" stroke="#EFE6DC" stroke-width="4" fill="none" stroke-linecap="round"/>';
+    const QUESTIONS = [
+      { d: 'M 50 65 Q 120 35 190 25', w: 9, options: ['強勢、有決斷力', '溫柔、好相處', '低調、不起眼'], answer: 0, lesson: '眉尾高＝訊息往上送。劍眉給人「有主張、有決斷」的感覺。' },
+      { d: 'M 50 30 Q 120 55 190 70', w: 9, options: ['銳利、有攻擊性', '溫柔、無害', '強勢、有威嚴'], answer: 1, lesson: '眉尾低＝訊息往下走。下垂眉給人「溫柔、沒攻擊性」的感覺。' },
+      { d: 'M 50 55 Q 120 40 190 55', w: 9, options: ['溫和、好相處', '有距離感', '強勢、主導'], answer: 0, lesson: '水平線＝平穩、無威脅。平眉給人「好相處」的感覺。' },
+      { d: 'M 50 55 Q 120 40 190 55', w: 18, options: ['存在感強、有氣勢', '低調、容易忽略', '柔和、沒存在感'], answer: 0, lesson: '色塊大＝存在感強。濃眉的人，一進場就被注意到。' },
+      { d: 'M 50 55 Q 120 40 190 55', w: 3, options: ['存在感強', '低調、融入感強', '強勢、銳利'], answer: 1, lesson: '線條細＝訊息輕。淡眉的人，容易被忽略，也容易融入。' },
+    ];
+
+    let idx = 0, score = 0;
+
+    function show(id) {
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+      window.scrollTo(0, 0);
+    }
+
+    function start() { idx = 0; score = 0; renderQ(); show('quiz'); }
+
+    function renderQ() {
+      const q = QUESTIONS[idx];
+      document.getElementById('qnum').textContent = `第 ${idx + 1} / 5 題`;
+      document.getElementById('bar').style.width = (idx / 5 * 100) + '%';
+      document.getElementById('eyebrow').innerHTML =
+        `<svg viewBox="0 0 240 160" fill="none"><path d="${q.d}" stroke="#5C4A3D" stroke-width="${q.w}" stroke-linecap="round"/>${EYE}</svg>`;
+      document.getElementById('options').innerHTML = q.options.map((o, i) =>
+        `<div class="opt" onclick="pick(${i})">${o}</div>`).join('');
+      document.getElementById('feedback').style.display = 'none';
+      document.getElementById('next-btn').style.display = 'none';
+      document.getElementById('next-btn').textContent = idx === 4 ? '看結果' : '下一題';
+    }
+
+    function pick(i) {
+      const q = QUESTIONS[idx];
+      document.querySelectorAll('.opt').forEach((o, j) => {
+        o.classList.add('disabled');
+        if (j === q.answer) o.classList.add('correct');
+        if (j === i && i !== q.answer) o.classList.add('wrong');
+      });
+      if (i === q.answer) score++;
+      document.getElementById('fb-title').textContent = i === q.answer ? '✅ 猜對了！' : `❌ 其實是「${q.options[q.answer]}」`;
+      document.getElementById('fb-lesson').textContent = q.lesson;
+      document.getElementById('feedback').style.display = 'block';
+      document.getElementById('next-btn').style.display = 'block';
+    }
+
+    function next() {
+      idx++;
+      if (idx < 5) renderQ();
+      else showResult();
+    }
+
+    function showResult() {
+      document.getElementById('score').textContent = `${score} / 5`;
+      let label, desc;
+      if (score === 5) { label = '天生的讀人高手'; desc = '你看得出眉毛在說話。想學得更深？工作坊教你背後的原理。'; }
+      else if (score >= 3) { label = '直覺不錯'; desc = '大部分你讀對了。工作坊能幫你把「猜」變成「看得懂」。'; }
+      else { label = '你的第一印象，可能正在誤導你'; desc = '不是你的問題，是沒人教過你眉毛怎麼說話。這正是工作坊要教的事。'; }
+      document.getElementById('result-label').textContent = label;
+      document.getElementById('result-desc').textContent = desc;
+      document.getElementById('final-lesson').innerHTML =
+        `<div style="font-size:13px;color:#B9A99C;letter-spacing:1px;margin-bottom:8px;">本課重點</div>` +
+        QUESTIONS.map(q => `<p style="font-size:14px;color:var(--ink);margin-bottom:6px;">${q.lesson}</p>`).join('');
+      show('result');
+    }
+
+    function restart() { start(); }
+  </script>
+</body>
+</html>

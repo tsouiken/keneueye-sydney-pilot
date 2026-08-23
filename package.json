@@ -1,0 +1,14 @@
+{
+  "name": "keneyecue-quiz",
+  "version": "0.1.0",
+  "private": true,
+  "description": "KenEyeCue 第一印象被低估測驗 MVP — 5 題測驗 → 結果 → NT$499 付款",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
