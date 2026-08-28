@@ -1,5 +1,6 @@
 node_modules/
 .env
 orders.json
+uploads/
 .DS_Store
 *.log
