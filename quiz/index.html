@@ -72,7 +72,8 @@
     <button id="btn-share" class="btn btn-ghost btn-share" type="button">分享這個結果</button>
     <p id="share-hint" class="share-hint" hidden></p>
 
-    <a id="btn-unlock" class="btn btn-gold" href="checkout.html">解鎖完整第一印象報告 NT$499</a>
+    <a id="btn-unlock" class="btn btn-gold" href="submit.html">免費取得你的完整報告</a>
+    <p class="cta-sub">先做出來給你看，看到內容再決定要不要解鎖。</p>
     <p class="fineprint">測驗僅供參考，不構成任何保證。</p>
   </section>
 
@@ -153,7 +154,7 @@
     document.getElementById('share-line').textContent = r.shareLine;
     shareText = r.shareLine + '\n\n— KenEyeCue 第一印象被低估測驗\n' + location.origin + location.pathname;
 
-    document.getElementById('btn-unlock').href = 'checkout.html?r=' + r.dim;
+    document.getElementById('btn-unlock').href = 'submit.html?r=' + r.dim;
     show('result');
   }
 

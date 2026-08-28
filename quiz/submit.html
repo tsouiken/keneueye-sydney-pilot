@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>取得你的第一印象報告 — KenEyeCue</title>
+<meta name="description" content="填 7 題情境問卷、傳一張正面照，我們先把報告做出來。你看到內容之後，再決定要不要解鎖完整版。">
+<link rel="stylesheet" href="quiz.css">
+</head>
+<body>
+<div class="wrap">
+
+  <div class="brand">KenEyeCue</div>
+  <div style="height:36px"></div>
+
+  <p class="kicker">下一步</p>
+  <h1 class="serif">先把報告做出來，<br>你看到之後再決定。</h1>
+  <p class="lead">填完下面的資料就好，這一步不用付費。我們做完之後會通知你，你看得到內容，再決定要不要解鎖完整版。</p>
+
+  <div id="form-area">
+    <h2 class="serif" style="margin:28px 0 6px">情境問卷</h2>
+    <p class="lead" style="font-size:14px;margin-bottom:20px">7 題，2 分鐘。選最接近的就好。</p>
+    <div id="q-list"></div>
+
+    <h2 class="serif" style="margin:28px 0 6px">正面照</h2>
+    <p class="lead" style="font-size:14px;margin-bottom:16px">自然光、無濾鏡、正面平視、眉眼清楚。僅用於眉眼結構觀察。</p>
+    <input type="file" id="photo-input" accept="image/*" capture="user" style="display:none">
+    <button id="btn-photo" class="btn btn-ghost">選擇照片</button>
+    <p id="photo-name" class="fineprint" style="display:none"></p>
+
+    <h2 class="serif" style="margin:28px 0 6px">怎麼通知你</h2>
+    <p class="lead" style="font-size:14px;margin-bottom:12px">報告做好了要找得到你。LINE ID 或 Email 都可以。</p>
+    <input type="text" id="contact" class="text-input" placeholder="例如：LINE ID 或 email">
+
+    <button id="btn-submit" class="btn btn-gold" style="margin-top:24px" disabled>送出，開始製作報告</button>
+    <p id="msg" class="fineprint"></p>
+  </div>
+
+  <div id="done-area" style="display:none">
+    <div class="status-box">
+      <div class="status-icon ok">✓</div>
+      <h1 class="serif">收到了</h1>
+      <p class="lead">我們會開始做你的報告，完成後用你留的方式通知你。</p>
+      <p class="order-id">案件編號：<span id="done-id"></span></p>
+    </div>
+    <a id="btn-goto-report" class="btn btn-gold">查看進度</a>
+    <p class="fineprint">把這一頁的網址存起來，之後可以直接回來看報告。</p>
+  </div>
+
+  <p class="fineprint">測驗與報告僅供參考，不構成任何保證。</p>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var params = new URLSearchParams(location.search);
+  var dim = params.get('r') || '';
+
+  var orderId = params.get('order') || '';
+  var token = params.get('t') || '';
+
+  var QUESTIONS = [];
+  var answers = {};
+  var photoData = null;
+
+  var qList = document.getElementById('q-list');
+  var photoInput = document.getElementById('photo-input');
+  var btnPhoto = document.getElementById('btn-photo');
+  var photoName = document.getElementById('photo-name');
+  var contactEl = document.getElementById('contact');
+  var btnSubmit = document.getElementById('btn-submit');
+  var msg = document.getElementById('msg');
+
+  function setMsg(t, color) {
+    msg.textContent = t;
+    msg.style.color = color || '';
+  }
+
+  // 建案件（若網址沒帶就新建一個）
+  function ensureCase() {
+    if (orderId && token) return Promise.resolve();
+    return fetch('/api/case', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ result: dim })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        orderId = d.orderId;
+        token = d.token;
+        // 寫進網址，重新整理不會掉
+        history.replaceState(null, '', 'submit.html?r=' + encodeURIComponent(dim) +
+          '&order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token));
+      });
+  }
+
+  function loadQuestionnaire() {
+    return fetch('/api/questionnaire')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        QUESTIONS = data.questions;
+        renderQuestions();
+      });
+  }
+
+  function renderQuestions() {
+    qList.innerHTML = '';
+    QUESTIONS.forEach(function (q, qi) {
+      var qwrap = document.createElement('div');
+      qwrap.style.marginBottom = '18px';
+      var label = document.createElement('p');
+      label.style.fontSize = '14px';
+      label.style.fontWeight = '600';
+      label.style.marginBottom = '8px';
+      label.textContent = (qi + 1) + '. ' + q.text;
+      qwrap.appendChild(label);
+      q.options.forEach(function (opt, oi) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'option';
+        b.textContent = opt;
+        b.style.marginBottom = '8px';
+        b.addEventListener('click', function () {
+          answers[q.id] = opt;
+          qwrap.querySelectorAll('.option').forEach(function (el, idx) {
+            el.classList.toggle('selected', idx === oi);
+          });
+          checkReady();
+        });
+        qwrap.appendChild(b);
+      });
+      qList.appendChild(qwrap);
+    });
+  }
+
+  btnPhoto.addEventListener('click', function () { photoInput.click(); });
+  photoInput.addEventListener('change', function () {
+    var f = photoInput.files && photoInput.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      if (e.target.result.length > 5 * 1024 * 1024) { setMsg('照片太大（限 5MB）。', '#b3261e'); return; }
+      photoData = e.target.result;
+      photoName.textContent = '已選：' + f.name;
+      photoName.style.display = 'block';
+      checkReady();
+    };
+    reader.readAsDataURL(f);
+  });
+
+  contactEl.addEventListener('input', checkReady);
+
+  function checkReady() {
+    var qDone = QUESTIONS.length > 0 && QUESTIONS.every(function (q) { return answers[q.id]; });
+    btnSubmit.disabled = !(qDone && photoData && contactEl.value.trim().length >= 3);
+  }
+
+  btnSubmit.addEventListener('click', function () {
+    btnSubmit.disabled = true;
+    setMsg('送出中…');
+    fetch('/api/delivery', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderId: orderId, token: token, answers: answers, contact: contactEl.value.trim() })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) throw new Error(d.error || '問卷送出失敗');
+        return fetch('/api/upload-photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: orderId, token: token, photo: photoData })
+        }).then(function (r) { return r.json(); });
+      })
+      .then(function (d) {
+        if (!d.ok) throw new Error(d.error || '照片上傳失敗');
+        var url = 'report.html?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token);
+        document.getElementById('done-id').textContent = orderId;
+        document.getElementById('btn-goto-report').href = url;
+        document.getElementById('form-area').style.display = 'none';
+        document.getElementById('done-area').style.display = 'block';
+        history.replaceState(null, '', url);
+        window.scrollTo(0, 0);
+      })
+      .catch(function (err) {
+        setMsg(err.message, '#b3261e');
+        btnSubmit.disabled = false;
+      });
+  });
+
+  ensureCase()
+    .then(loadQuestionnaire)
+    .catch(function () { setMsg('載入失敗，請重新整理。', '#b3261e'); });
+})();
+</script>
+</body>
+</html>

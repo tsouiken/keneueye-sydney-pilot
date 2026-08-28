@@ -34,21 +34,24 @@ test('API 完整流程（模擬付款模式）', async (t) => {
   assert.strictEqual(health.json.demo, true, '未設綠界憑證應為模擬模式');
   assert.strictEqual(health.json.price, 499);
 
-  // 2. 建立訂單 → 模擬模式回傳 orderId
-  const order = await req('POST', '/api/order', { result: 'soft' });
-  assert.strictEqual(order.status, 200);
-  assert.strictEqual(order.json.demo, true);
-  const orderId = order.json.orderId;
-  assert.match(orderId, /^KC\d{17}$/, '訂單編號格式 KC + 17 位數字');
+  // 2. 建立案件（結果式付費：先建案件，付款是最後一步）
+  const created = await req('POST', '/api/case', { result: 'soft' });
+  assert.strictEqual(created.status, 200);
+  const orderId = created.json.orderId;
+  const token = created.json.token;
+  assert.match(orderId, /^KC\d{17}$/, '案件編號格式 KC + 17 位數字');
 
-  // 3. 訂單初始為 pending
-  const pending = await req('GET', `/api/order/${orderId}`);
-  assert.strictEqual(pending.json.status, 'pending');
-  assert.strictEqual(pending.json.amount, 499);
-  assert.strictEqual(pending.json.result, 'soft');
+  // 3. 案件初始為 open
+  const opened = await req('GET', `/api/order/${orderId}`);
+  assert.strictEqual(opened.json.status, 'open');
+  assert.strictEqual(opened.json.amount, 499);
+  assert.strictEqual(opened.json.result, 'soft');
+
+  // 3b. 公開查詢不得洩漏存取碼
+  assert.ok(!('token' in opened.json), '/api/order/:id 不得回傳 token');
 
   // 4. 模擬付款成功
-  const pay = await req('POST', '/api/demo-pay', { orderId });
+  const pay = await req('POST', '/api/demo-pay', { orderId, token });
   assert.strictEqual(pay.status, 200);
   assert.strictEqual(pay.json.ok, true);
 

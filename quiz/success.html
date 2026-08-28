@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>完成交付資料 — KenEyeCue</title>
+<title>付款完成 — KenEyeCue</title>
+<meta name="description" content="付款完成，完整報告已解鎖。">
 <link rel="stylesheet" href="quiz.css">
 </head>
 <body>
@@ -12,33 +13,22 @@
   <div class="brand">KenEyeCue</div>
 
   <div id="status" class="status-box">
-    <div class="status-icon wait">…</div>
-    <h1 class="serif" id="status-title">確認訂單中</h1>
+    <div class="status-icon wait" id="status-icon">…</div>
+    <h1 class="serif" id="status-title">確認付款中</h1>
     <p id="status-desc" class="lead" style="margin-bottom:0">請稍候…</p>
+    <p class="order-id" id="order-line" style="display:none">案件編號：<span id="order-id"></span></p>
   </div>
 
-  <!-- 問卷 + 照片交付區（付款成功後顯示） -->
-  <div id="delivery" style="display:none">
+  <a id="btn-report" class="btn btn-gold" style="display:none">看完整報告</a>
 
-    <div class="status-box" style="padding-bottom:8px">
-      <div class="status-icon ok">✓</div>
-      <h1 class="serif">付款成功</h1>
-      <p class="lead">完成下面資料，我們就能開始做你的報告。</p>
-      <p class="order-id">訂單編號：<span id="order-id"></span></p>
+  <div id="atm-box" style="display:none">
+    <div class="result-note">
+      <strong>ATM 待付款</strong><br>
+      銀行代碼：<span id="atm-bank"></span><br>
+      虛擬帳號：<span id="atm-account"></span><br>
+      繳費期限：<span id="atm-expire"></span>
     </div>
-
-    <h2 class="serif" style="margin:24px 0 6px">情境問卷</h2>
-    <p class="lead" style="font-size:14px;margin-bottom:20px">7 題，2 分鐘。選最接近的就好。</p>
-    <div id="q-list"></div>
-
-    <h2 class="serif" style="margin:28px 0 6px">正面照</h2>
-    <p class="lead" style="font-size:14px;margin-bottom:16px">自然光、無濾鏡、正面平視、眉眼清楚。僅用於眉眼結構觀察。</p>
-    <input type="file" id="photo-input" accept="image/*" capture="user" style="display:none">
-    <button id="btn-photo" class="btn btn-ghost">選擇照片</button>
-    <p id="photo-name" class="fineprint" style="display:none"></p>
-
-    <button id="btn-submit" class="btn btn-gold" style="margin-top:24px" disabled>送出，開始製作報告</button>
-    <p id="delivery-msg" class="fineprint"></p>
+    <p class="fineprint">入帳後完整報告會自動解鎖，這一頁重新整理就看得到。</p>
   </div>
 
   <p class="fineprint">測驗與報告僅供參考，不構成任何保證。</p>
@@ -50,135 +40,53 @@
   'use strict';
   var params = new URLSearchParams(location.search);
   var orderId = params.get('order') || '';
+  var token = params.get('t') || '';
 
-  var status = document.getElementById('status');
+  var icon = document.getElementById('status-icon');
   var title = document.getElementById('status-title');
   var desc = document.getElementById('status-desc');
-  var delivery = document.getElementById('delivery');
-  var qList = document.getElementById('q-list');
-  var photoInput = document.getElementById('photo-input');
-  var btnPhoto = document.getElementById('btn-photo');
-  var photoName = document.getElementById('photo-name');
-  var btnSubmit = document.getElementById('btn-submit');
-  var msg = document.getElementById('delivery-msg');
+  var btnReport = document.getElementById('btn-report');
 
-  var QUESTIONS = [];
-  var answers = {};
-  var photoData = null;
+  if (!orderId) {
+    title.textContent = '案件編號遺失';
+    desc.textContent = '請用當初收到的完整連結開啟。';
+    return;
+  }
 
-  function setMsg(t, color) { msg.textContent = t || ''; msg.style.color = color || ''; }
+  document.getElementById('order-id').textContent = orderId;
+  document.getElementById('order-line').style.display = 'block';
 
-  // 確認訂單已付款
-  function check() {
-    if (!orderId) { title.textContent = '訂單編號遺失'; return; }
-    fetch('/api/order/' + encodeURIComponent(orderId))
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        if (data.status === 'paid') {
-          status.style.display = 'none';
-          delivery.style.display = 'block';
-          document.getElementById('order-id').textContent = orderId;
-          loadQuestionnaire();
-          return;
+  fetch('/api/order/' + encodeURIComponent(orderId))
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.status === 'paid') {
+        icon.className = 'status-icon ok';
+        icon.textContent = '✓';
+        title.textContent = '付款完成';
+        desc.textContent = '完整報告已經解鎖了。';
+        if (token) {
+          btnReport.href = 'report.html?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token);
+          btnReport.style.display = 'block';
+        } else {
+          desc.textContent = '完整報告已解鎖，請用當初收到的報告連結開啟。';
         }
-        title.textContent = '等待付款確認';
-        desc.textContent = '付款完成後，此頁會自動更新。';
-        setTimeout(check, 3000);
-      })
-      .catch(function () { setTimeout(check, 5000); });
-  }
+        return;
+      }
 
-  // 載入 7 題問卷
-  function loadQuestionnaire() {
-    fetch('/api/questionnaire')
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        QUESTIONS = data.questions;
-        renderQuestions();
-      })
-      .catch(function () { setMsg('問卷載入失敗，請重新整理。', '#b3261e'); });
-  }
+      if (d.status === 'atm_pending') {
+        title.textContent = 'ATM 待付款';
+        desc.textContent = '轉帳完成後，完整報告會自動解鎖。';
+        document.getElementById('atm-box').style.display = 'block';
+        return;
+      }
 
-  function renderQuestions() {
-    qList.innerHTML = '';
-    QUESTIONS.forEach(function (q, qi) {
-      var qwrap = document.createElement('div');
-      qwrap.style.marginBottom = '18px';
-      var label = document.createElement('p');
-      label.style.fontSize = '14px';
-      label.style.fontWeight = '600';
-      label.style.marginBottom = '8px';
-      label.textContent = (qi + 1) + '. ' + q.text;
-      qwrap.appendChild(label);
-      q.options.forEach(function (opt, oi) {
-        var b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'option';
-        b.textContent = opt;
-        b.style.marginBottom = '8px';
-        b.addEventListener('click', function () {
-          answers[q.id] = opt;
-          var opts = qwrap.querySelectorAll('.option');
-          opts.forEach(function (el, idx) { el.classList.toggle('selected', idx === oi); });
-          checkReady();
-        });
-        qwrap.appendChild(b);
-      });
-      qList.appendChild(qwrap);
-    });
-  }
-
-  // 照片選取 → 轉 data URL
-  btnPhoto.addEventListener('click', function () { photoInput.click(); });
-  photoInput.addEventListener('change', function () {
-    var f = photoInput.files && photoInput.files[0];
-    if (!f) return;
-    var reader = new FileReader();
-    reader.onload = function (e) {
-      if (e.target.result.length > 5 * 1024 * 1024) { setMsg('照片太大（限 5MB）。', '#b3261e'); return; }
-      photoData = e.target.result;
-      photoName.textContent = '已選：' + f.name;
-      photoName.style.display = 'block';
-      checkReady();
-    };
-    reader.readAsDataURL(f);
-  });
-
-  function checkReady() {
-    var qDone = QUESTIONS.length > 0 && QUESTIONS.every(function (q) { return answers[q.id]; });
-    btnSubmit.disabled = !(qDone && photoData);
-  }
-
-  // 送出：先存作答，再存照片
-  btnSubmit.addEventListener('click', function () {
-    btnSubmit.disabled = true;
-    setMsg('送出中…');
-    fetch('/api/delivery', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderId: orderId, answers: answers })
+      title.textContent = '尚未收到付款';
+      desc.textContent = '如果你剛完成付款，稍等一下再重新整理這一頁。';
     })
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        if (!data.ok) { throw new Error(data.error || '問卷送出失敗'); }
-        return fetch('/api/upload-photo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId: orderId, photo: photoData })
-        }).then(function (r) { return r.json(); });
-      })
-      .then(function (data) {
-        if (!data.ok) { throw new Error(data.error || '照片上傳失敗'); }
-        setMsg('✔ 資料已送出！我們會在 48 小時內交付你的報告。', '#3d7a4f');
-        btnSubmit.textContent = '已送出';
-      })
-      .catch(function (err) {
-        setMsg(err.message, '#b3261e');
-        btnSubmit.disabled = false;
-      });
-  });
-
-  check();
+    .catch(function () {
+      title.textContent = '查詢失敗';
+      desc.textContent = '請稍後重新整理這一頁。';
+    });
 })();
 </script>
 </body>

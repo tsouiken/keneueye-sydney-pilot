@@ -20,6 +20,7 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { URL } = require('url');
 
 // 輕量 .env 載入（零依賴）：本機開發用，Railway 用平台 env 覆蓋
@@ -36,6 +37,7 @@ const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, '');
 const PRICE = 499;
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
 const TRADE_DESC = '第一印象被低估報告';
 const ITEM_NAME = '完整第一印象報告';
 
@@ -108,20 +110,47 @@ function saveOrders() {
   try { fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2)); } catch (_) { /* 唯讀環境不阻斷 */ }
 }
 
-function createOrder(result) {
+// 案件狀態機（結果式付費）：
+//   open          建立，尚未收到問卷／照片
+//   submitted     問卷＋照片都收齊，等 Ken 分析
+//   preview_ready 報告已寫好，對方可看預覽
+//   atm_pending   ATM 虛擬帳號已產生，尚未入帳
+//   paid          已付款，完整報告解鎖
+function createCase(result) {
   const ts = new Date().toISOString().replace(/\D/g, '').slice(0, 14); // 14 位
   const rand = String(Math.floor(Math.random() * 900) + 100);           // 3 位
   const id = 'KC' + ts + rand;                                          // 19 字元 ≤ 20
   orders[id] = {
     id,
+    // 存取用的隨機 token：報告與照片網址都要帶，避免靠猜訂單號翻到別人的資料
+    token: crypto.randomBytes(16).toString('hex'),
     result: result || '',
     amount: PRICE,
-    status: 'pending',
+    status: 'open',
     createdAt: new Date().toISOString()
   };
   saveOrders();
-  fireWebhook('order.created', { orderId: id, result: result || '', amount: PRICE });
+  fireWebhook('case.created', { orderId: id, result: result || '', amount: PRICE });
   return orders[id];
+}
+
+// token 比對（長度不同直接失敗，避免 timingSafeEqual 丟例外）
+function tokenOk(order, token) {
+  if (!order || typeof token !== 'string') return false;
+  const a = Buffer.from(order.token || '', 'utf8');
+  const b = Buffer.from(token, 'utf8');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+// 問卷與照片都到齊 → 進入待分析
+function markSubmittedIfComplete(order) {
+  if (order.status === 'open' && order.answers && order.photo) {
+    order.status = 'submitted';
+    order.submittedAt = new Date().toISOString();
+    fireWebhook('case.submitted', { orderId: order.id, result: order.result, contact: order.contact || '' });
+    sendLine('【KenEyeCue 待分析】\n案件：' + order.id + '\n測驗：' + (order.result || '—') + '\n聯絡：' + (order.contact || '—') + '\n→ 問卷與照片已收齊，可以開始寫報告');
+  }
 }
 
 // ---------- 靜態檔 ----------
@@ -197,8 +226,11 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/delivery' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
-      if (order.status !== 'paid') return sendJson(res, 400, { ok: false, error: '訂單尚未付款' });
+      if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
+      if (!tokenOk(order, body.token)) return sendJson(res, 403, { ok: false, error: '存取碼不正確' });
+      // 結果式付費：問卷在付款「之前」收，所以這裡不擋未付款
+      const contact = String(body.contact || '').trim();
+      if (contact.length < 3) return sendJson(res, 400, { ok: false, error: '請留下聯絡方式，報告好了才通知得到你' });
       const answersRaw = body.answers || {};
       const answers = {};
       let ok = true;
@@ -209,45 +241,92 @@ const server = http.createServer(async (req, res) => {
       });
       if (!ok) return sendJson(res, 400, { ok: false, error: '請完成全部 7 題' });
       order.answers = answers;
+      order.contact = contact;
       order.answersSubmittedAt = new Date().toISOString();
+      markSubmittedIfComplete(order);
       saveOrders();
-      return sendJson(res, 200, { ok: true, orderId: order.id });
+      return sendJson(res, 200, { ok: true, orderId: order.id, status: order.status });
     }
 
     if (p === '/api/upload-photo' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
-      if (order.status !== 'paid') return sendJson(res, 400, { ok: false, error: '訂單尚未付款' });
+      if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
+      if (!tokenOk(order, body.token)) return sendJson(res, 403, { ok: false, error: '存取碼不正確' });
       const data = body.photo; // data URL 或 base64
       if (typeof data !== 'string' || data.length < 100) return sendJson(res, 400, { ok: false, error: '照片資料無效' });
       const m = data.match(/^data:(image\/\w+);base64,(.+)$/);
       if (!m) return sendJson(res, 400, { ok: false, error: '僅支援 data URL 照片' });
       const ext = m[1] === 'image/png' ? 'png' : 'jpg';
-      const fname = `photo-${order.id}.${ext}`;
+      // 檔名帶 token：/uploads/* 是公開靜態路徑，未付款者的照片也會存在這裡，
+      // 檔名必須猜不到，否則靠訂單號就能翻到別人的臉。
+      const fname = `photo-${order.id}-${order.token.slice(0, 16)}.${ext}`;
       fs.writeFileSync(path.join(UPLOAD_DIR, fname), Buffer.from(m[2], 'base64'));
       order.photo = '/uploads/' + fname;
       order.photoSubmittedAt = new Date().toISOString();
+      markSubmittedIfComplete(order);
       saveOrders();
-      return sendJson(res, 200, { ok: true, photo: order.photo, orderId: order.id });
+      return sendJson(res, 200, { ok: true, photo: order.photo, orderId: order.id, status: order.status });
     }
 
     if (p === '/api/report' && req.method === 'GET') {
-      const order = orders[new URLSearchParams(u.search).get('order') || ''];
-      if (!order) return sendJson(res, 404, { error: '訂單不存在' });
-      return sendJson(res, 200, {
+      const qs = new URLSearchParams(u.search);
+      const order = orders[qs.get('order') || ''];
+      if (!order) return sendJson(res, 404, { error: '案件不存在' });
+      if (!tokenOk(order, qs.get('t'))) return sendJson(res, 403, { error: '存取碼不正確' });
+
+      const paid = order.status === 'paid';
+      const payload = {
         orderId: order.id,
         status: order.status,
+        amount: order.amount,
+        result: order.result || '',
         answers: order.answers || null,
         photo: order.photo || null,
-        // ⚠️ 待接：AI 報告生成（目前為人工交付；此處僅回傳已收集的資料）
-        reportReady: !!(order.answers && order.photo)
-      });
+        previewReady: !!order.preview,
+        preview: order.preview || null
+      };
+      // ⚠️ 付費邊界：完整報告只有付款後才離開伺服器。
+      // 未付款一律不帶 full 欄位，不能只靠前端隱藏。
+      if (paid) payload.full = order.full || null;
+      return sendJson(res, 200, payload);
+    }
+
+    // 建立案件（免費，測驗做完就建）
+    if (p === '/api/case' && req.method === 'POST') {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const order = createCase(body.result);
+      return sendJson(res, 200, { orderId: order.id, token: order.token });
+    }
+
+    // Ken 交報告用：需要 ADMIN_TOKEN
+    if (p === '/api/admin/report' && req.method === 'POST') {
+      if (!ADMIN_TOKEN) return sendJson(res, 503, { ok: false, error: '未設定 ADMIN_TOKEN' });
+      if (req.headers['x-admin-token'] !== ADMIN_TOKEN) return sendJson(res, 403, { ok: false, error: '無權限' });
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const order = orders[body.orderId];
+      if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
+      const preview = String(body.preview || '').trim();
+      const full = String(body.full || '').trim();
+      if (!preview || !full) return sendJson(res, 400, { ok: false, error: 'preview 與 full 都必填' });
+      order.preview = preview;
+      order.full = full;
+      if (order.status !== 'paid') order.status = 'preview_ready';
+      order.reportReadyAt = new Date().toISOString();
+      saveOrders();
+      fireWebhook('case.preview_ready', { orderId: order.id, contact: order.contact || '' });
+      return sendJson(res, 200, { ok: true, orderId: order.id, status: order.status });
     }
 
     if (p === '/api/order' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}');
-      const order = createOrder(body.result);
+      const order = orders[body.orderId];
+      if (!order) return sendJson(res, 404, { error: '案件不存在' });
+      if (!tokenOk(order, body.token)) return sendJson(res, 403, { error: '存取碼不正確' });
+      // 結果式付費：報告預覽出來之前不開放付款
+      if (order.status !== 'preview_ready' && order.status !== 'atm_pending') {
+        return sendJson(res, 409, { error: '報告尚未完成，還不能付款', status: order.status });
+      }
 
       if (DEMO) {
         return sendJson(res, 200, { demo: true, orderId: order.id });
@@ -310,7 +389,7 @@ const server = http.createServer(async (req, res) => {
             orderId: order.id, amount: order.amount, result: order.result,
             tradeNo: order.tradeNo, method: vAccount ? 'ATM' : 'Credit'
           });
-          sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：' + (vAccount ? 'ATM' : 'Credit') + '\n→ 準備交付（問卷＋照片＋48h 報告）');
+          sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：' + (vAccount ? 'ATM' : 'Credit') + '\n→ 完整報告已解鎖');
         }
       }
       res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -318,15 +397,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/demo-pay' && req.method === 'POST') {
+      // 只在模擬模式開放：正式接上綠界後，這條等於免費解鎖完整報告
+      if (!DEMO) return sendJson(res, 404, { ok: false, error: '不存在' });
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
+      if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
+      if (!tokenOk(order, body.token)) return sendJson(res, 403, { ok: false, error: '存取碼不正確' });
       order.status = 'paid';
       order.paidAt = new Date().toISOString();
       order.tradeNo = 'DEMO-' + order.id;
       saveOrders();
       fireWebhook('order.paid', { orderId: order.id, amount: order.amount, result: order.result, tradeNo: order.tradeNo, method: 'DEMO' });
-      sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：DEMO\n→ 準備交付（問卷＋照片＋48h 報告）');
+      sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：DEMO\n→ 完整報告已解鎖');
       return sendJson(res, 200, { ok: true, orderId: order.id });
     }
 
