@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KenEyeCue · 客戶案例時間軸</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'PingFang TC', 'Microsoft JhengHei', sans-serif; background: #f0f0ea; color: #1a1a1a; font-size: 14px; }
+
+.topbar { background: #1a1a1a; color: #fff; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; }
+.topbar h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.5px; }
+.topbar-right { display: flex; align-items: center; gap: 12px; font-size: 12px; color: #aaa; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: #4caf50; display: inline-block; margin-right: 4px; }
+
+.page { max-width: 960px; margin: 0 auto; padding: 24px 20px; }
+
+/* Filters */
+.filters { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+.filter-btn { padding: 6px 14px; border-radius: 20px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: #fff; color: #555; font-family: inherit; }
+.filter-btn.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+.filter-btn:hover:not(.active) { background: #f0f0ea; }
+.search-input { padding: 6px 14px; border-radius: 20px; border: 1px solid #ddd; font-size: 12px; font-family: inherit; background: #fff; flex: 1; min-width: 160px; max-width: 280px; }
+.search-input:focus { outline: none; border-color: #1a1a1a; }
+
+/* Timeline */
+.timeline { position: relative; }
+.timeline::before { content: ''; position: absolute; left: 120px; top: 0; bottom: 0; width: 2px; background: #e5e5e0; }
+
+.month-group { margin-bottom: 32px; }
+.month-label { font-size: 12px; font-weight: 700; color: #aaa; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; padding-left: 140px; }
+
+.tl-row { display: flex; align-items: flex-start; gap: 0; margin-bottom: 10px; position: relative; }
+.tl-date { width: 108px; text-align: right; font-size: 11px; color: #999; padding-top: 14px; padding-right: 16px; flex-shrink: 0; }
+.tl-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #1a1a1a; background: #fff; flex-shrink: 0; margin-top: 12px; margin-right: 14px; position: relative; z-index: 1; }
+.tl-dot.full { background: #1a1a1a; }
+.tl-dot.l1 { border-color: #2980b9; }
+.tl-dot.l2 { border-color: #8e44ad; }
+.tl-dot.eyebrow { border-color: #1a6b3c; }
+.tl-dot.followup { border-color: #e67e22; background: #e67e22; }
+
+.tl-card { flex: 1; background: #fff; border: 1px solid #e5e5e0; border-radius: 8px; padding: 12px 16px; cursor: pointer; transition: box-shadow 0.15s; }
+.tl-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.tl-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.client-name { font-size: 14px; font-weight: 600; }
+.service-tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 500; }
+.st-full { background: #1a1a1a; color: #fff; }
+.st-l1 { background: #e8f0fd; color: #1a5cb0; }
+.st-l2 { background: #f3e8fd; color: #6b1ab0; }
+.st-eyebrow { background: #e8f5ee; color: #1a6b3c; }
+.st-report { background: #fff3cd; color: #856404; }
+.st-followup { background: #fde8e8; color: #c0392b; }
+
+.tl-meta { font-size: 12px; color: #888; margin-bottom: 6px; }
+.tl-notes { font-size: 12px; color: #555; line-height: 1.5; }
+.tl-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.amount { font-size: 13px; font-weight: 600; color: #1a1a1a; }
+.followup-tags { display: flex; gap: 6px; }
+.ftag { font-size: 10px; padding: 2px 6px; border-radius: 3px; background: #f0f0ea; color: #666; }
+.ftag.done { background: #e8f5ee; color: #1a6b3c; }
+.ftag.pending { background: #fff3cd; color: #856404; }
+
+/* Client Panel (right drawer simulation) */
+.client-panel { display: none; position: fixed; right: 0; top: 0; bottom: 0; width: 320px; background: #fff; border-left: 1px solid #e5e5e0; padding: 24px 20px; overflow-y: auto; box-shadow: -4px 0 12px rgba(0,0,0,0.08); z-index: 10; }
+.client-panel.open { display: block; }
+.panel-close { position: absolute; top: 16px; right: 16px; background: none; border: none; font-size: 20px; cursor: pointer; color: #999; }
+.panel-name { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+.panel-meta { font-size: 12px; color: #888; margin-bottom: 16px; }
+.panel-section { margin-bottom: 16px; }
+.panel-section h4 { font-size: 11px; font-weight: 700; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+.panel-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-bottom: 1px solid #f5f5f0; }
+.panel-row:last-child { border: none; }
+.panel-row .k { color: #888; }
+.panel-row .v { font-weight: 500; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>KenEyeCue · 客戶案例時間軸</h1>
+  <div class="topbar-right">
+    <span><span class="status-dot"></span>Notion 已連線</span>
+    <span>|</span>
+    <a href="dashboard.html" style="color:#aaa;text-decoration:none;">← 今日儀表板</a>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- Filters -->
+  <div class="filters">
+    <input class="search-input" type="text" placeholder="搜尋客戶姓名…" id="searchInput">
+    <button class="filter-btn active" data-filter="all">全部</button>
+    <button class="filter-btn" data-filter="full">Full Calibration</button>
+    <button class="filter-btn" data-filter="l1">L1 工作坊</button>
+    <button class="filter-btn" data-filter="l2">L2 實戰班</button>
+    <button class="filter-btn" data-filter="eyebrow">修眉</button>
+    <button class="filter-btn" data-filter="followup">待跟進</button>
+  </div>
+
+  <!-- Timeline -->
+  <div class="timeline" id="timeline">
+
+    <!-- August 2026 -->
+    <div class="month-group" data-month="2026-08">
+    <div class="month-label">2026 年 8 月</div>
+
+    <div class="tl-row" data-type="full" data-name="林">
+      <div class="tl-date">8/24（一）</div>
+      <div class="tl-dot full"></div>
+      <div class="tl-card" onclick="openPanel('林','A 創業者','Full Calibration','AUD $350','8/24','報告逾期中','D7 回訪待傳，升級訊息待定')">
+        <div class="tl-card-top">
+          <span class="client-name">林</span>
+          <span class="service-tag st-full">Full Calibration</span>
+        </div>
+        <div class="tl-meta">A 創業者 · 雪梨 CBD</div>
+        <div class="tl-notes">眉頭偏平、眉尾下垂，整體給人疲憊感。建議提峰、調整眉尾角度。</div>
+        <div class="tl-footer">
+          <span class="amount">AUD $350</span>
+          <div class="followup-tags">
+            <span class="ftag pending">報告未交付</span>
+            <span class="ftag">D7 待傳</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tl-row" data-type="eyebrow" data-name="陳">
+      <div class="tl-date">8/26（三）</div>
+      <div class="tl-dot eyebrow"></div>
+      <div class="tl-card" onclick="openPanel('陳','C 專業工作者','眉眼報告','AUD $150','8/26','報告今日到期','首次服務，有升級意願')">
+        <div class="tl-card-top">
+          <span class="client-name">陳</span>
+          <span class="service-tag st-report">眉眼報告</span>
+        </div>
+        <div class="tl-meta">C 專業工作者 · 雪梨北區</div>
+        <div class="tl-notes">眉頭過重、眉色不均。第一印象偏強硬，本人表示常被說「很嚴肅」。</div>
+        <div class="tl-footer">
+          <span class="amount">AUD $150</span>
+          <div class="followup-tags">
+            <span class="ftag pending">報告今日到期</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tl-row" data-type="l1" data-name="王">
+      <div class="tl-date">8/21（五）</div>
+      <div class="tl-dot l1"></div>
+      <div class="tl-card" onclick="openPanel('王','B 主管','L1 入門工作坊','AUD $150','8/21','D7 回訪今日','有意升 L2')">
+        <div class="tl-card-top">
+          <span class="client-name">王</span>
+          <span class="service-tag st-l1">L1 入門工作坊</span>
+        </div>
+        <div class="tl-meta">B 主管 · 雪梨</div>
+        <div class="tl-notes">學習速度快，眉型觀察已能準確指出眉峰位置。課後反饋很正面。</div>
+        <div class="tl-footer">
+          <span class="amount">AUD $150</span>
+          <div class="followup-tags">
+            <span class="ftag pending">D7 今日傳</span>
+            <span class="ftag">升 L2 意願高</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tl-row" data-type="l1" data-name="張">
+      <div class="tl-date">8/21（五）</div>
+      <div class="tl-dot l1"></div>
+      <div class="tl-card" onclick="openPanel('張','C 專業工作者','L1 入門工作坊','AUD $150','8/21','D7 已傳','繼續觀察')">
+        <div class="tl-card-top">
+          <span class="client-name">張</span>
+          <span class="service-tag st-l1">L1 入門工作坊</span>
+        </div>
+        <div class="tl-meta">C 專業工作者 · 墨爾本（線上）</div>
+        <div class="tl-notes">第一次線上課，鏡頭清晰度夠。觀察力中等，需要更多案例練習。</div>
+        <div class="tl-footer">
+          <span class="amount">AUD $150</span>
+          <div class="followup-tags">
+            <span class="ftag done">D7 已傳</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    </div><!-- end August -->
+
+    <!-- July 2026 -->
+    <div class="month-group" data-month="2026-07">
+    <div class="month-label">2026 年 7 月</div>
+
+    <div class="tl-row" data-type="full" data-name="劉">
+      <div class="tl-date">7/15（三）</div>
+      <div class="tl-dot full"></div>
+      <div class="tl-card" onclick="openPanel('劉','A 創業者','Full Calibration','AUD $350','7/15','D30 已傳','升級銀牌意願確認中')">
+        <div class="tl-card-top">
+          <span class="client-name">劉</span>
+          <span class="service-tag st-full">Full Calibration</span>
+        </div>
+        <div class="tl-meta">A 創業者 · 雪梨 CBD</div>
+        <div class="tl-notes">服務後第一印象大幅改善，本人反饋工作上明顯感受到不同。D30 追蹤結果正向。</div>
+        <div class="tl-footer">
+          <span class="amount">AUD $350</span>
+          <div class="followup-tags">
+            <span class="ftag done">D7 已傳</span>
+            <span class="ftag done">D30 已傳</span>
+            <span class="ftag pending">銀牌升級確認中</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tl-row" data-type="l2" data-name="蔡">
+      <div class="tl-date">7/5（日）</div>
+      <div class="tl-dot l2"></div>
+      <div class="tl-card" onclick="openPanel('蔡','B 主管','L2 實戰班','AUD $350','7/5','授權已取得','案例可用')">
+        <div class="tl-card-top">
+          <span class="client-name">蔡</span>
+          <span class="service-tag st-l2">L2 實戰班</span>
+        </div>
+        <div class="tl-meta">B 主管 · 雪梨</div>
+        <div class="tl-notes">Before/After 案例效果極佳，已取得去識別化授權。可用於課程示範材料。</div>
+        <div class="tl-footer">
+          <span class="amount">AUD $350</span>
+          <div class="followup-tags">
+            <span class="ftag done">授權取得</span>
+            <span class="ftag done">D7 已傳</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    </div><!-- end July -->
+
+  </div><!-- end timeline -->
+</div><!-- end page -->
+
+<!-- Client Detail Panel -->
+<div class="client-panel" id="clientPanel">
+  <button class="panel-close" onclick="closePanel()">×</button>
+  <div class="panel-name" id="pName"></div>
+  <div class="panel-meta" id="pMeta"></div>
+  <div class="panel-section">
+    <h4>服務紀錄</h4>
+    <div class="panel-row"><span class="k">服務類型</span><span class="v" id="pService"></span></div>
+    <div class="panel-row"><span class="k">服務日期</span><span class="v" id="pDate"></span></div>
+    <div class="panel-row"><span class="k">金額</span><span class="v" id="pAmount"></span></div>
+  </div>
+  <div class="panel-section">
+    <h4>跟進狀態</h4>
+    <div class="panel-row"><span class="k">當前狀態</span><span class="v" id="pStatus"></span></div>
+    <div class="panel-row"><span class="k">備註</span><span class="v" id="pNotes"></span></div>
+  </div>
+  <div class="panel-section">
+    <h4>快速動作</h4>
+    <button style="width:100%;padding:8px;background:#1a1a1a;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;margin-bottom:8px;font-family:inherit;" onclick="alert('複製話術功能開發中')">複製 D7 話術</button>
+    <button style="width:100%;padding:8px;background:#fff;color:#1a1a1a;border:1px solid #ddd;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;" onclick="alert('Notion 連結開發中')">開啟 Notion 紀錄</button>
+  </div>
+</div>
+
+<script>
+// Filter functionality
+var activeFilter = 'all';
+document.querySelectorAll('.filter-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    activeFilter = this.dataset.filter;
+    document.querySelectorAll('.filter-btn').forEach(function(b){ b.classList.remove('active'); });
+    this.classList.add('active');
+    applyFilters();
+  });
+});
+
+document.getElementById('searchInput').addEventListener('input', applyFilters);
+
+function applyFilters() {
+  var search = document.getElementById('searchInput').value.toLowerCase();
+  document.querySelectorAll('.tl-row').forEach(function(row) {
+    var typeMatch = activeFilter === 'all' || row.dataset.type === activeFilter;
+    var nameMatch = !search || row.dataset.name.toLowerCase().includes(search);
+    row.style.display = (typeMatch && nameMatch) ? 'flex' : 'none';
+  });
+}
+
+// Client panel
+function openPanel(name, occ, service, amount, date, status, notes) {
+  document.getElementById('pName').textContent = name;
+  document.getElementById('pMeta').textContent = occ;
+  document.getElementById('pService').textContent = service;
+  document.getElementById('pDate').textContent = date;
+  document.getElementById('pAmount').textContent = amount;
+  document.getElementById('pStatus').textContent = status;
+  document.getElementById('pNotes').textContent = notes;
+  document.getElementById('clientPanel').classList.add('open');
+}
+function closePanel() {
+  document.getElementById('clientPanel').classList.remove('open');
+}
+</script>
+
+</body>
+</html>
