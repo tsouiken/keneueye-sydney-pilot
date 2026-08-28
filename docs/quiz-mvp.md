@@ -86,7 +86,26 @@ ECPAY_HASH_IV=
 1. **綠界商戶**：MerchantID / HashKey / HashIV（申請後填入即啟用真實收款）
 2. **`ADMIN_TOKEN`**：沒設定的話 `/api/admin/report` 回 503，報告交不進去，案件會卡在 `submitted`
 3. **LINE 關鍵字回覆**：在 LINE 官方帳號後台設定「Cue我」→ 測驗網址（不用寫程式）
-4. **交報告的方式**：目前是 curl／Make 打 `/api/admin/report`，還沒有後台介面
+4. **交報告的方式**：用後台 `/quiz/admin.html`（見下節）
+
+## 交報告：後台
+
+`/quiz/admin.html`。貼上 `ADMIN_TOKEN` 就進得去，token 只存在該分頁的 sessionStorage，關掉即失效。
+
+1. **待處理佇列** — 預設只列 `submitted` 與 `open` 的案件，可切換顯示全部
+2. **點進案件** — 看得到 7 題作答（顯示題目原文，不是 `q1`／`q2`）、正面照、測驗結果、聯絡方式
+3. **寫兩段** — 預覽段（免費看得到）與完整報告（付費後解鎖）
+4. **送出後** — 直接給你可複製的報告連結（已帶案件 token），貼給對方即可
+
+後台端點（都需要 `x-admin-token`）：
+
+| 端點 | 用途 |
+|---|---|
+| `GET /api/admin/cases` | 待處理佇列（`?all=1` 列全部） |
+| `GET /api/admin/case/:id` | 單一案件明細＋報告連結 |
+| `POST /api/admin/report` | 交報告 |
+
+也可以不用介面，直接打 API：
 
 ```bash
 curl -X POST "$BASE_URL/api/admin/report" \
@@ -94,6 +113,8 @@ curl -X POST "$BASE_URL/api/admin/report" \
   -H "x-admin-token: $ADMIN_TOKEN" \
   -d '{"orderId":"KC...","preview":"先給看的一段","full":"完整報告"}'
 ```
+
+> `ADMIN_TOKEN` 是整個後台唯一的門。它等於可以讀到所有客戶的作答與照片，請用夠長的隨機字串，不要重複使用其他地方的密碼。
 
 ## 結果式付費的取捨
 

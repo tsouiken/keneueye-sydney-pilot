@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>交報告 — KenEyeCue</title>
+<link rel="stylesheet" href="quiz.css">
+<style>
+  .wrap { max-width: 720px; }
+  .case-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--card);
+    margin-bottom: 8px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--ink);
+  }
+  .case-row:hover { border-color: var(--gold); }
+  .case-row .cid { font-weight: 600; letter-spacing: 0.02em; }
+  .case-row .meta { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .pill {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    padding: 2px 8px;
+    border-radius: 99px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+  }
+  .pill.ready { color: var(--gold-deep); border-color: var(--gold); }
+  .answers { font-size: 14px; margin: 12px 0 20px; }
+  .answers dt { font-weight: 600; margin-top: 12px; color: #4a463c; }
+  .answers dd { margin-left: 0; color: #5c564a; }
+  textarea.text-input { min-height: 140px; resize: vertical; line-height: 1.8; }
+  .photo-thumb { max-width: 200px; border-radius: 6px; border: 1px solid var(--line); }
+  .row-2 { display: flex; gap: 10px; }
+  .row-2 .btn { flex: 1; }
+  .copy-box {
+    font-size: 12px;
+    word-break: break-all;
+    background: #f3efe3;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 10px 12px;
+    color: #5c564a;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="brand">KenEyeCue</div>
+  <div style="height:28px"></div>
+
+  <!-- 登入 -->
+  <section id="auth">
+    <p class="kicker">後台</p>
+    <h1 class="serif" style="font-size:26px">交報告</h1>
+    <p class="lead">貼上 ADMIN_TOKEN。只存在這個分頁，關掉就沒了。</p>
+    <input type="password" id="token-input" class="text-input" placeholder="ADMIN_TOKEN" autocomplete="off">
+    <button id="btn-auth" class="btn btn-gold" style="margin-top:14px">進入</button>
+    <p id="auth-msg" class="fineprint"></p>
+  </section>
+
+  <!-- 佇列 -->
+  <section id="queue" style="display:none">
+    <p class="kicker">待處理</p>
+    <h1 class="serif" style="font-size:26px">等你寫報告的案件</h1>
+    <div class="row-2" style="margin:16px 0">
+      <button id="btn-refresh" class="btn btn-ghost">重新整理</button>
+      <button id="btn-toggle-all" class="btn btn-ghost">顯示全部</button>
+    </div>
+    <div id="case-list"></div>
+    <p id="queue-msg" class="fineprint"></p>
+  </section>
+
+  <!-- 單一案件 -->
+  <section id="detail" style="display:none">
+    <button id="btn-back" class="btn btn-ghost" style="margin-bottom:20px">← 回列表</button>
+
+    <p class="kicker">案件</p>
+    <h1 class="serif" style="font-size:24px" id="d-id"></h1>
+    <p class="lead" style="font-size:14px" id="d-meta"></p>
+
+    <h2 class="serif" style="margin:24px 0 8px;font-size:18px">正面照</h2>
+    <img id="d-photo" class="photo-thumb" alt="案件照片">
+    <p id="d-nophoto" class="fineprint" style="display:none">尚未上傳照片。</p>
+
+    <h2 class="serif" style="margin:24px 0 8px;font-size:18px">7 題作答</h2>
+    <dl class="answers" id="d-answers"></dl>
+
+    <h2 class="serif" style="margin:24px 0 8px;font-size:18px">預覽段（免費看得到）</h2>
+    <textarea id="d-preview" class="text-input" placeholder="這一段是對方付費前就會看到的。要給到「被說中」的程度，但留住後面。"></textarea>
+
+    <h2 class="serif" style="margin:24px 0 8px;font-size:18px">完整報告（付費後解鎖）</h2>
+    <textarea id="d-full" class="text-input" placeholder="完整內容。付款前不會離開伺服器。"></textarea>
+
+    <button id="btn-save" class="btn btn-gold" style="margin-top:18px">送出報告</button>
+    <p id="save-msg" class="fineprint"></p>
+
+    <div id="link-box" style="display:none">
+      <p class="fineprint" style="text-align:left;margin-top:18px">把這個連結給對方：</p>
+      <div class="copy-box" id="report-link"></div>
+      <button id="btn-copy" class="btn btn-ghost" style="margin-top:10px">複製連結</button>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var token = sessionStorage.getItem('kec_admin_token') || '';
+  var showAll = false;
+  var current = null;
+  // 題目文字：作答只存 id，後台要顯示題目原文才讀得懂
+  var QTEXT = {};
+
+  function $(id) { return document.getElementById(id); }
+  function show(name) {
+    ['auth', 'queue', 'detail'].forEach(function (k) {
+      $(k).style.display = (k === name) ? 'block' : 'none';
+    });
+    window.scrollTo(0, 0);
+  }
+
+  function loadQuestionText() {
+    return fetch('/api/questionnaire')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        (d.questions || []).forEach(function (q) { QTEXT[q.id] = q.text; });
+      })
+      .catch(function () { /* 讀不到就退回顯示 id */ });
+  }
+
+  function api(path, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign({ 'x-admin-token': token }, opts.headers || {});
+    return fetch(path, opts).then(function (r) {
+      return r.json().then(function (j) { return { status: r.status, json: j }; });
+    });
+  }
+
+  // ---- 登入 ----
+  $('btn-auth').addEventListener('click', function () {
+    token = $('token-input').value.trim();
+    if (!token) { $('auth-msg').textContent = '請貼上 token。'; return; }
+    $('auth-msg').textContent = '確認中…';
+    api('/api/admin/cases').then(function (r) {
+      if (r.status === 403) { $('auth-msg').textContent = 'token 不正確。'; return; }
+      if (r.status !== 200) { $('auth-msg').textContent = '後台未啟用（伺服器沒設 ADMIN_TOKEN）。'; return; }
+      sessionStorage.setItem('kec_admin_token', token);
+      $('auth-msg').textContent = '';
+      loadQuestionText();
+      renderQueue(r.json.cases);
+      show('queue');
+    }).catch(function () { $('auth-msg').textContent = '連線失敗。'; });
+  });
+
+  // ---- 佇列 ----
+  function loadQueue() {
+    $('queue-msg').textContent = '讀取中…';
+    api('/api/admin/cases' + (showAll ? '?all=1' : '')).then(function (r) {
+      if (r.status !== 200) { $('queue-msg').textContent = '讀取失敗。'; return; }
+      $('queue-msg').textContent = '';
+      renderQueue(r.json.cases);
+    });
+  }
+
+  function renderQueue(cases) {
+    var box = $('case-list');
+    box.innerHTML = '';
+    if (!cases.length) {
+      var empty = document.createElement('p');
+      empty.className = 'fineprint';
+      empty.style.textAlign = 'left';
+      empty.textContent = showAll ? '還沒有任何案件。' : '目前沒有等著寫的案件。';
+      box.appendChild(empty);
+      return;
+    }
+    cases.forEach(function (c) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'case-row';
+
+      var cid = document.createElement('span');
+      cid.className = 'cid';
+      cid.textContent = c.id;
+      b.appendChild(cid);
+
+      var pill = document.createElement('span');
+      pill.className = 'pill' + (c.status === 'submitted' ? ' ready' : '');
+      pill.textContent = c.status;
+      b.appendChild(pill);
+
+      var meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = (c.contact || '無聯絡方式') + (c.hasReport ? '｜已交報告' : '');
+      b.appendChild(meta);
+
+      b.addEventListener('click', function () { openCase(c.id); });
+      box.appendChild(b);
+    });
+  }
+
+  $('btn-refresh').addEventListener('click', loadQueue);
+  $('btn-toggle-all').addEventListener('click', function () {
+    showAll = !showAll;
+    $('btn-toggle-all').textContent = showAll ? '只看待處理' : '顯示全部';
+    loadQueue();
+  });
+
+  // ---- 單一案件 ----
+  function openCase(id) {
+    api('/api/admin/case/' + encodeURIComponent(id)).then(function (r) {
+      if (r.status !== 200) { alert('讀取失敗'); return; }
+      current = r.json;
+      $('d-id').textContent = current.id;
+      $('d-meta').textContent =
+        '狀態：' + current.status +
+        '｜測驗：' + (current.result || '—') +
+        '｜聯絡：' + (current.contact || '—');
+
+      if (current.photo) {
+        $('d-photo').src = current.photo;
+        $('d-photo').style.display = 'block';
+        $('d-nophoto').style.display = 'none';
+      } else {
+        $('d-photo').style.display = 'none';
+        $('d-nophoto').style.display = 'block';
+      }
+
+      var dl = $('d-answers');
+      dl.innerHTML = '';
+      if (current.answers) {
+        Object.keys(current.answers).forEach(function (k) {
+          var dt = document.createElement('dt');
+          dt.textContent = QTEXT[k] || k;
+          var dd = document.createElement('dd');
+          dd.textContent = current.answers[k];
+          dl.appendChild(dt);
+          dl.appendChild(dd);
+        });
+      } else {
+        var dd0 = document.createElement('dd');
+        dd0.textContent = '尚未作答。';
+        dl.appendChild(dd0);
+      }
+
+      $('d-preview').value = current.preview || '';
+      $('d-full').value = current.full || '';
+      $('save-msg').textContent = '';
+      $('link-box').style.display = current.preview ? 'block' : 'none';
+      $('report-link').textContent = location.origin + current.reportUrl;
+      show('detail');
+    });
+  }
+
+  $('btn-back').addEventListener('click', function () { loadQueue(); show('queue'); });
+
+  $('btn-save').addEventListener('click', function () {
+    var preview = $('d-preview').value.trim();
+    var full = $('d-full').value.trim();
+    if (!preview || !full) { $('save-msg').textContent = '預覽段與完整報告都要填。'; return; }
+    $('btn-save').disabled = true;
+    $('save-msg').textContent = '送出中…';
+    api('/api/admin/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderId: current.id, preview: preview, full: full })
+    }).then(function (r) {
+      $('btn-save').disabled = false;
+      if (r.status !== 200 || !r.json.ok) {
+        $('save-msg').textContent = '送出失敗：' + ((r.json && r.json.error) || r.status);
+        return;
+      }
+      $('save-msg').textContent = '✔ 已送出，對方現在看得到預覽了。';
+      $('save-msg').style.color = '#3d7a4f';
+      $('link-box').style.display = 'block';
+    }).catch(function () {
+      $('btn-save').disabled = false;
+      $('save-msg').textContent = '連線失敗。';
+    });
+  });
+
+  $('btn-copy').addEventListener('click', function () {
+    var text = $('report-link').textContent;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        $('btn-copy').textContent = '已複製';
+        setTimeout(function () { $('btn-copy').textContent = '複製連結'; }, 1500);
+      });
+    }
+  });
+
+  // 這個分頁之前登入過就直接進佇列
+  if (token) {
+    api('/api/admin/cases').then(function (r) {
+      if (r.status === 200) { loadQuestionText(); renderQueue(r.json.cases); show('queue'); }
+      else { show('auth'); }
+    }).catch(function () { show('auth'); });
+  } else {
+    show('auth');
+  }
+})();
+</script>
+</body>
+</html>

@@ -110,3 +110,48 @@ test('結果式付費：完整報告只有付款後才拿得到', async (t) => {
   const cross = await req('GET', `/api/report?order=${orderId}&t=${other.json.token}`);
   assert.strictEqual(cross.status, 403, '不得用別的案件的 token 讀取');
 });
+
+test('後台端點：沒有 ADMIN_TOKEN 一律擋掉', async (t) => {
+  const P2 = 3900 + Math.floor(Math.random() * 300);
+  const B2 = `http://127.0.0.1:${P2}`;
+  const D2 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-admin-'));
+  const c2 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: { ...process.env, PORT: String(P2), DATA_DIR: D2, ADMIN_TOKEN },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  for (let i = 0; i < 60; i++) {
+    try { await fetch(B2 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  t.after(() => { c2.kill(); fs.rmSync(D2, { recursive: true, force: true }); });
+
+  const call = (url, tok) => fetch(B2 + url, { headers: tok ? { 'x-admin-token': tok } : {} })
+    .then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+
+  // 建一件有內容的案件
+  const made = await fetch(B2 + '/api/case', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ result: 'soft' })
+  }).then((r) => r.json());
+
+  // 沒 token / 錯 token 都不行
+  assert.strictEqual((await call('/api/admin/cases')).status, 403);
+  assert.strictEqual((await call('/api/admin/cases', 'wrong-token')).status, 403);
+  assert.strictEqual((await call(`/api/admin/case/${made.orderId}`)).status, 403);
+  assert.strictEqual((await call(`/api/admin/case/${made.orderId}`, 'wrong-token')).status, 403);
+
+  // 對的 token 拿得到佇列
+  const q = await call('/api/admin/cases', ADMIN_TOKEN);
+  assert.strictEqual(q.status, 200);
+  assert.ok(Array.isArray(q.json.cases));
+  assert.ok(q.json.cases.some((c) => c.id === made.orderId), '新案件應該出現在待處理佇列');
+
+  // 明細帶得出報告連結（含 token），Ken 才貼得給對方
+  const d = await call(`/api/admin/case/${made.orderId}`, ADMIN_TOKEN);
+  assert.strictEqual(d.status, 200);
+  assert.ok(d.json.reportUrl.includes(made.orderId));
+  assert.ok(d.json.reportUrl.includes(made.token));
+
+  // 佇列摘要不得夾帶存取碼（那是給客戶的，不該在列表裡外流）
+  const listed = q.json.cases.find((c) => c.id === made.orderId);
+  assert.ok(!('token' in listed), '佇列摘要不得包含 token');
+});

@@ -134,6 +134,17 @@ function createCase(result) {
   return orders[id];
 }
 
+// 後台驗證：ADMIN_TOKEN 沒設就整組後台關閉
+function adminOk(req) {
+  if (!ADMIN_TOKEN) return false;
+  const got = req.headers['x-admin-token'];
+  if (typeof got !== 'string') return false;
+  const a = Buffer.from(ADMIN_TOKEN, 'utf8');
+  const b = Buffer.from(got, 'utf8');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
 // token 比對（長度不同直接失敗，避免 timingSafeEqual 丟例外）
 function tokenOk(order, token) {
   if (!order || typeof token !== 'string') return false;
@@ -299,10 +310,56 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { orderId: order.id, token: order.token });
     }
 
+    // ---------- 後台（都需要 ADMIN_TOKEN） ----------
+    // 待辦佇列：預設只列還沒交報告的案件
+    if (p === '/api/admin/cases' && req.method === 'GET') {
+      if (!adminOk(req)) return sendJson(res, 403, { error: '無權限' });
+      const all = String(new URLSearchParams(u.search).get('all') || '') === '1';
+      const list = Object.values(orders)
+        .filter(function (o) { return all || (o.status === 'submitted' || o.status === 'open'); })
+        .sort(function (a, b) { return String(b.createdAt).localeCompare(String(a.createdAt)); })
+        .map(function (o) {
+          return {
+            id: o.id,
+            status: o.status,
+            result: o.result || '',
+            contact: o.contact || '',
+            createdAt: o.createdAt,
+            submittedAt: o.submittedAt || null,
+            hasAnswers: !!o.answers,
+            hasPhoto: !!o.photo,
+            hasReport: !!o.preview
+          };
+        });
+      return sendJson(res, 200, { cases: list, count: list.length });
+    }
+
+    // 單一案件明細：Ken 要看作答與照片才寫得出報告
+    const adminCase = p.match(/^\/api\/admin\/case\/([A-Za-z0-9]+)$/);
+    if (adminCase && req.method === 'GET') {
+      if (!adminOk(req)) return sendJson(res, 403, { error: '無權限' });
+      const order = orders[adminCase[1]];
+      if (!order) return sendJson(res, 404, { error: '案件不存在' });
+      return sendJson(res, 200, {
+        id: order.id,
+        status: order.status,
+        result: order.result || '',
+        contact: order.contact || '',
+        createdAt: order.createdAt,
+        submittedAt: order.submittedAt || null,
+        answers: order.answers || null,
+        photo: order.photo || null,
+        preview: order.preview || '',
+        full: order.full || '',
+        // 讓 Ken 能把報告連結直接貼給對方
+        reportUrl: '/quiz/report.html?order=' + order.id + '&t=' + order.token
+      });
+    }
+
     // Ken 交報告用：需要 ADMIN_TOKEN
     if (p === '/api/admin/report' && req.method === 'POST') {
       if (!ADMIN_TOKEN) return sendJson(res, 503, { ok: false, error: '未設定 ADMIN_TOKEN' });
-      if (req.headers['x-admin-token'] !== ADMIN_TOKEN) return sendJson(res, 403, { ok: false, error: '無權限' });
+      if (!adminOk(req)) return sendJson(res, 403, { ok: false, error: '無權限' });
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
       if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
