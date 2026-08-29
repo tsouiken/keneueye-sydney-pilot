@@ -58,7 +58,11 @@
     var bp = document.getElementById('btn-pay');
     if (bp) { bp.disabled = true; bp.textContent = '無法付款'; }
   } else {
-    recap.innerHTML = '案件編號：<strong>' + orderId + '</strong>';
+    // 案件編號來自網址，不能直接塞進 innerHTML
+    recap.textContent = '案件編號：';
+    var strong = document.createElement('strong');
+    strong.textContent = orderId;
+    recap.appendChild(strong);
   }
 
   var btnPay = document.getElementById('btn-pay');

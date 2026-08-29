@@ -445,3 +445,45 @@ test('LINE 設定好時，送出問卷不能因為通知失敗而 500', async (t
   assert.strictEqual(onDisk[c.json.orderId].status, 'submitted', '狀態要落地');
   assert.ok(onDisk[c.json.orderId].photo, '照片路徑要落地');
 });
+
+test('照片大小：前端說 5MB，伺服器就要收得下 5MB（也不能收超過）', async (t) => {
+  const P9 = 6100 + Math.floor(Math.random() * 300);
+  const B9 = `http://127.0.0.1:${P9}`;
+  const D9 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-photo-'));
+  const c9 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: { ...process.env, PORT: String(P9), DATA_DIR: D9, ADMIN_TOKEN },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  for (let i = 0; i < 60; i++) {
+    try { await fetch(B9 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  t.after(() => { c9.kill(); fs.rmSync(D9, { recursive: true, force: true }); });
+
+  const post = (url, body) => fetch(B9 + url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+
+  const mkPhoto = (bytes) => 'data:image/jpeg;base64,' + Buffer.alloc(bytes, 7).toString('base64');
+
+  // 4.5MB 的照片是手機隨手一拍的常態，一定要收得下
+  const c = await post('/api/case', { result: 'soft' });
+  const big = await post('/api/upload-photo', {
+    orderId: c.json.orderId, token: c.json.token, photo: mkPhoto(4.5 * 1024 * 1024)
+  });
+  assert.strictEqual(big.status, 200, '4.5MB 的照片必須傳得上去');
+  assert.ok(fs.existsSync(path.join(D9, 'uploads', path.basename(big.json.photo))), '檔案要真的寫進去');
+
+  // 超過 5MB 要明講太大，不能砍連線也不能 500
+  const c2 = await post('/api/case', { result: 'soft' });
+  const over = await post('/api/upload-photo', {
+    orderId: c2.json.orderId, token: c2.json.token, photo: mkPhoto(5.5 * 1024 * 1024)
+  });
+  assert.strictEqual(over.status, 413, '超過 5MB 要回 413，而且要回得了');
+  assert.match(over.json.error, /太大/);
+
+  // 一般 JSON 端點的上限不能跟著放大
+  const flood = await post('/api/delivery', {
+    orderId: c.json.orderId, token: c.json.token, contact: 'x'.repeat(2 * 1024 * 1024), answers: {}
+  });
+  assert.strictEqual(flood.status, 413, '非照片端點維持小上限');
+});

@@ -135,12 +135,19 @@
   }
 
   btnPhoto.addEventListener('click', function () { photoInput.click(); });
+  // 和伺服器的 MAX_PHOTO_BYTES 同一個數字，量的也是同一件事：原始檔案大小。
+  var MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+
   photoInput.addEventListener('change', function () {
     var f = photoInput.files && photoInput.files[0];
     if (!f) return;
+    if (f.size > MAX_PHOTO_BYTES) {
+      setMsg('照片太大（限 5MB），請換一張。', '#b3261e');
+      photoInput.value = '';
+      return;
+    }
     var reader = new FileReader();
     reader.onload = function (e) {
-      if (e.target.result.length > 5 * 1024 * 1024) { setMsg('照片太大（限 5MB）。', '#b3261e'); return; }
       photoData = e.target.result;
       photoName.textContent = '已選：' + f.name;
       photoName.style.display = 'block';

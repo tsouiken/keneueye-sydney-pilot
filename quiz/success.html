@@ -62,45 +62,71 @@
     ? '/api/report?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token)
     : '/api/order/' + encodeURIComponent(orderId);
 
-  fetch(lookup)
-    .then(function (r) { return r.json(); })
-    .then(function (d) {
-      if (d.status === 'paid') {
-        icon.className = 'status-icon ok';
-        icon.textContent = '✓';
-        title.textContent = '付款完成';
-        desc.textContent = '完整報告已經解鎖了。';
-        if (token) {
-          btnReport.href = 'report.html?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token);
-          btnReport.style.display = 'block';
-        } else {
-          desc.textContent = '完整報告已解鎖，請用當初收到的報告連結開啟。';
-        }
-        return;
-      }
+  // 綠界可能比它自己的付款通知還早把人導回這一頁，
+  // 只查一次就會停在「尚未收到付款」不動。所以要輪詢等通知進來。
+  var MAX_TRIES = 10;
+  var INTERVAL_MS = 3000;
+  var tries = 0;
 
-      if (d.status === 'atm_pending') {
-        title.textContent = 'ATM 待付款';
-        if (d.vAccount) {
-          desc.textContent = '用下面的虛擬帳號轉帳，入帳後完整報告會自動解鎖。';
-          document.getElementById('atm-bank').textContent = d.bankCode || '—';
-          document.getElementById('atm-account').textContent = d.vAccount;
-          document.getElementById('atm-expire').textContent = d.expireDate || '—';
-          document.getElementById('atm-box').style.display = 'block';
-        } else {
-          // 沒帶 token 或還沒拿到帳號：不要顯示空白欄位騙人
-          desc.textContent = '請用當初收到的完整連結開啟，才看得到轉帳用的虛擬帳號。';
-        }
-        return;
-      }
+  function renderPaid() {
+    icon.className = 'status-icon ok';
+    icon.textContent = '✓';
+    title.textContent = '付款完成';
+    if (token) {
+      desc.textContent = '完整報告已經解鎖了。';
+      btnReport.href = 'report.html?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token);
+      btnReport.style.display = 'block';
+    } else {
+      desc.textContent = '完整報告已解鎖，請用當初收到的報告連結開啟。';
+    }
+  }
 
-      title.textContent = '尚未收到付款';
-      desc.textContent = '如果你剛完成付款，稍等一下再重新整理這一頁。';
-    })
-    .catch(function () {
-      title.textContent = '查詢失敗';
-      desc.textContent = '請稍後重新整理這一頁。';
-    });
+  function renderAtm(d) {
+    title.textContent = 'ATM 待付款';
+    if (d.vAccount) {
+      desc.textContent = '用下面的虛擬帳號轉帳，入帳後完整報告會自動解鎖。';
+      document.getElementById('atm-bank').textContent = d.bankCode || '—';
+      document.getElementById('atm-account').textContent = d.vAccount;
+      document.getElementById('atm-expire').textContent = d.expireDate || '—';
+      document.getElementById('atm-box').style.display = 'block';
+    } else {
+      // 沒帶 token 或還沒拿到帳號：不要顯示空白欄位騙人
+      desc.textContent = '請用當初收到的完整連結開啟，才看得到轉帳用的虛擬帳號。';
+    }
+  }
+
+  function giveUp() {
+    title.textContent = '尚未收到付款';
+    desc.textContent = '如果你剛完成付款，銀行端可能還在處理。稍等一下再重新整理這一頁。';
+  }
+
+  function poll() {
+    tries += 1;
+    fetch(lookup)
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.status === 'paid') return renderPaid();
+        if (d.status === 'atm_pending' && d.vAccount) return renderAtm(d);
+
+        if (tries >= MAX_TRIES) {
+          // ATM 但一直沒拿到帳號，也是要講清楚，不能停在「確認付款中」
+          if (d.status === 'atm_pending') return renderAtm(d);
+          return giveUp();
+        }
+        desc.textContent = '正在跟金流確認，請稍候…';
+        setTimeout(poll, INTERVAL_MS);
+      })
+      .catch(function () {
+        if (tries >= MAX_TRIES) {
+          title.textContent = '查詢失敗';
+          desc.textContent = '請稍後重新整理這一頁。';
+          return;
+        }
+        setTimeout(poll, INTERVAL_MS);
+      });
+  }
+
+  poll();
 })();
 </script>
 </body>

@@ -263,12 +263,33 @@ function serveStatic(req, res, pathname) {
 }
 
 // ---------- 工具 ----------
-function readBody(req) {
+// 一般 JSON 請求的上限。照片走另一條，見 MAX_PHOTO_BODY。
+const MAX_BODY = 1e6;
+// 對外承諾的照片上限，指的是原始檔案大小。
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+// base64 會脹成 4/3，再加上 data URL 前綴與 JSON 外框，
+// 所以傳輸上限要比 MAX_PHOTO_BYTES 寬，否則前端說 5MB、伺服器 1MB 就砍掉。
+const MAX_PHOTO_BODY = 8 * 1024 * 1024;
+
+function readBody(req, limit = MAX_BODY) {
   return new Promise((resolve, reject) => {
     let raw = '';
-    req.on('data', (c) => { raw += c; if (raw.length > 1e6) req.destroy(); });
-    req.on('end', () => resolve(raw));
-    req.on('error', reject);
+    let over = false;
+    req.on('data', (c) => {
+      if (over) return;
+      raw += c;
+      if (raw.length > limit) {
+        // 超過就別再累積（記憶體要有上限），但不要 destroy，
+        // 不然回不了 413，對方只會看到連線被砍。
+        over = true;
+        raw = '';
+        const err = new Error('請求內容太大');
+        err.tooLarge = true;
+        reject(err);
+      }
+    });
+    req.on('end', () => { if (!over) resolve(raw); });
+    req.on('error', (e) => { if (!over) reject(e); });
   });
 }
 
@@ -326,7 +347,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/upload-photo' && req.method === 'POST') {
-      const body = JSON.parse((await readBody(req)) || '{}');
+      const body = JSON.parse((await readBody(req, MAX_PHOTO_BODY)) || '{}');
       const order = orders[body.orderId];
       if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
       if (!tokenOk(order, body.token)) return sendJson(res, 403, { ok: false, error: '存取碼不正確' });
@@ -334,11 +355,16 @@ const server = http.createServer(async (req, res) => {
       if (typeof data !== 'string' || data.length < 100) return sendJson(res, 400, { ok: false, error: '照片資料無效' });
       const m = data.match(/^data:(image\/\w+);base64,(.+)$/);
       if (!m) return sendJson(res, 400, { ok: false, error: '僅支援 data URL 照片' });
+      const buf = Buffer.from(m[2], 'base64');
+      // 前端也擋，但前端擋得住的只有誠實的前端
+      if (buf.length > MAX_PHOTO_BYTES) {
+        return sendJson(res, 413, { ok: false, error: '照片太大（限 5MB）' });
+      }
       const ext = m[1] === 'image/png' ? 'png' : 'jpg';
       // 檔名帶 token：/uploads/* 是公開靜態路徑，未付款者的照片也會存在這裡，
       // 檔名必須猜不到，否則靠訂單號就能翻到別人的臉。
       const fname = `photo-${order.id}-${order.token.slice(0, 16)}.${ext}`;
-      fs.writeFileSync(path.join(UPLOAD_DIR, fname), Buffer.from(m[2], 'base64'));
+      fs.writeFileSync(path.join(UPLOAD_DIR, fname), buf);
       order.photo = '/uploads/' + fname;
       order.photoSubmittedAt = new Date().toISOString();
       markSubmittedIfComplete(order);
@@ -565,6 +591,9 @@ const server = http.createServer(async (req, res) => {
 
     res.writeHead(405); res.end('Method Not Allowed');
   } catch (err) {
+    if (err && err.tooLarge) {
+      return sendJson(res, 413, { ok: false, error: '內容太大，請換一張小一點的照片。' });
+    }
     sendJson(res, 500, { error: '伺服器錯誤' });
   }
 });
