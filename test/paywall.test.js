@@ -205,3 +205,60 @@ test('跑單防護：同一個聯絡方式不能無限排隊未付款案件', as
   const afterPaid = await submit('line:same-person');
   assert.strictEqual(afterPaid.res.status, 200, '已付款的案件不該再佔用名額');
 });
+
+test('舊資料遷移：結果式付費之前的訂單不能被 token 檢查鎖在門外', async (t) => {
+  const P4 = 4500 + Math.floor(Math.random() * 300);
+  const B4 = `http://127.0.0.1:${P4}`;
+  const D4 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-legacy-'));
+
+  // 用舊 schema 寫一份 orders.json：沒有 token，狀態是舊的 pending / paid
+  fs.writeFileSync(path.join(D4, 'orders.json'), JSON.stringify({
+    KC20260101000000001: {
+      id: 'KC20260101000000001', result: 'soft', amount: 499,
+      status: 'paid', createdAt: '2026-01-01T00:00:00.000Z'
+    },
+    KC20260101000000002: {
+      id: 'KC20260101000000002', result: 'hard', amount: 499,
+      status: 'pending', createdAt: '2026-01-01T00:00:00.000Z'
+    }
+  }, null, 2));
+
+  const c4 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: { ...process.env, PORT: String(P4), DATA_DIR: D4, ADMIN_TOKEN },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  for (let i = 0; i < 60; i++) {
+    try { await fetch(B4 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  t.after(() => { c4.kill(); fs.rmSync(D4, { recursive: true, force: true }); });
+
+  const admin = (url) => fetch(B4 + url, { headers: { 'x-admin-token': ADMIN_TOKEN } })
+    .then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+
+  // 舊的 pending 應該被對應到新流程的 open
+  const migrated = await fetch(B4 + '/api/order/KC20260101000000002').then((r) => r.json());
+  assert.strictEqual(migrated.status, 'open', '舊 pending 應遷移成 open');
+
+  // 已付款的舊訂單狀態不該被動到
+  const paidLegacy = await fetch(B4 + '/api/order/KC20260101000000001').then((r) => r.json());
+  assert.strictEqual(paidLegacy.status, 'paid', '舊的已付款訂單不該被改狀態');
+
+  // 兩筆都要補到 token —— 從後台明細拿得到，且不是 undefined
+  const detail = await admin('/api/admin/case/KC20260101000000001');
+  assert.strictEqual(detail.status, 200);
+  assert.ok(!detail.json.reportUrl.includes('t=undefined'), '報告連結不得是 t=undefined');
+  const tok = new URL('http://x' + detail.json.reportUrl).searchParams.get('t');
+  assert.strictEqual(typeof tok, 'string');
+  assert.strictEqual(tok.length, 32, '遷移補的 token 應為 32 字元');
+
+  // 拿補好的 token 應該真的讀得到報告（已付款客戶不能被鎖在門外）
+  const rep = await fetch(`${B4}/api/report?order=KC20260101000000001&t=${tok}`)
+    .then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+  assert.strictEqual(rep.status, 200, '已付款的舊客戶必須讀得到自己的報告');
+  assert.strictEqual(rep.json.status, 'paid');
+
+  // 遷移結果要落地，不能只存在記憶體
+  const onDisk = JSON.parse(fs.readFileSync(path.join(D4, 'orders.json'), 'utf8'));
+  assert.strictEqual(onDisk.KC20260101000000001.token, tok, '補的 token 要寫回檔案');
+  assert.strictEqual(onDisk.KC20260101000000002.status, 'open');
+});

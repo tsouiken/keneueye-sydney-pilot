@@ -56,7 +56,13 @@
   document.getElementById('order-id').textContent = orderId;
   document.getElementById('order-line').style.display = 'block';
 
-  fetch('/api/order/' + encodeURIComponent(orderId))
+  // 有 token 就走 /api/report（同一支就帶得出 ATM 明細，且有存取碼保護）；
+  // 沒 token 只能查狀態，ATM 明細不該靠訂單號就拿得到。
+  var lookup = token
+    ? '/api/report?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token)
+    : '/api/order/' + encodeURIComponent(orderId);
+
+  fetch(lookup)
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (d.status === 'paid') {
@@ -75,8 +81,16 @@
 
       if (d.status === 'atm_pending') {
         title.textContent = 'ATM 待付款';
-        desc.textContent = '轉帳完成後，完整報告會自動解鎖。';
-        document.getElementById('atm-box').style.display = 'block';
+        if (d.vAccount) {
+          desc.textContent = '用下面的虛擬帳號轉帳，入帳後完整報告會自動解鎖。';
+          document.getElementById('atm-bank').textContent = d.bankCode || '—';
+          document.getElementById('atm-account').textContent = d.vAccount;
+          document.getElementById('atm-expire').textContent = d.expireDate || '—';
+          document.getElementById('atm-box').style.display = 'block';
+        } else {
+          // 沒帶 token 或還沒拿到帳號：不要顯示空白欄位騙人
+          desc.textContent = '請用當初收到的完整連結開啟，才看得到轉帳用的虛擬帳號。';
+        }
         return;
       }
 

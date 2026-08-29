@@ -113,6 +113,29 @@ function saveOrders() {
   try { fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2)); } catch (_) { /* 唯讀環境不阻斷 */ }
 }
 
+// 舊資料遷移：結果式付費之前建立的訂單沒有 token，也用舊的狀態名。
+// 不補的話，既有（含已付款）客戶會被 tokenOk 永遠擋在門外，
+// 後台產生的報告連結也會變成 t=undefined。
+function migrateLegacyOrders() {
+  let changed = 0;
+  Object.values(orders).forEach(function (o) {
+    if (!o.token) {
+      o.token = crypto.randomBytes(16).toString('hex');
+      changed++;
+    }
+    // 舊的 pending＝訂單已建立、還沒付款，對應新流程的 open
+    if (o.status === 'pending') {
+      o.status = 'open';
+      changed++;
+    }
+  });
+  if (changed) {
+    saveOrders();
+    console.log('[migrate] 補齊 ' + changed + ' 筆舊訂單欄位');
+  }
+}
+migrateLegacyOrders();
+
 // 案件狀態機（結果式付費）：
 //   open          建立，尚未收到問卷／照片
 //   submitted     問卷＋照片都收齊，等 Ken 分析
@@ -319,7 +342,11 @@ const server = http.createServer(async (req, res) => {
         answers: order.answers || null,
         photo: order.photo || null,
         previewReady: !!order.preview,
-        preview: order.preview || null
+        preview: order.preview || null,
+        // ATM 待付款時要把虛擬帳號帶給對方，否則他不知道要轉去哪
+        bankCode: order.bankCode || '',
+        vAccount: order.vAccount || '',
+        expireDate: order.expireDate || ''
       };
       // ⚠️ 付費邊界：完整報告只有付款後才離開伺服器。
       // 未付款一律不帶 full 欄位，不能只靠前端隱藏。
