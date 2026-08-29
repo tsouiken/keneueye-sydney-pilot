@@ -155,3 +155,53 @@ test('後台端點：沒有 ADMIN_TOKEN 一律擋掉', async (t) => {
   const listed = q.json.cases.find((c) => c.id === made.orderId);
   assert.ok(!('token' in listed), '佇列摘要不得包含 token');
 });
+
+test('跑單防護：同一個聯絡方式不能無限排隊未付款案件', async (t) => {
+  const P3 = 4200 + Math.floor(Math.random() * 300);
+  const B3 = `http://127.0.0.1:${P3}`;
+  const D3 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-ratelimit-'));
+  const c3 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    // 上限設 2：第三件同聯絡方式的未付款案件應被擋下
+    env: { ...process.env, PORT: String(P3), DATA_DIR: D3, ADMIN_TOKEN, MAX_OPEN_PER_CONTACT: '2' },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  for (let i = 0; i < 60; i++) {
+    try { await fetch(B3 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  t.after(() => { c3.kill(); fs.rmSync(D3, { recursive: true, force: true }); });
+
+  const post = (url, body, headers) => fetch(B3 + url, {
+    method: 'POST',
+    headers: Object.assign({ 'Content-Type': 'application/json' }, headers || {}),
+    body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+
+  const qs = await fetch(B3 + '/api/questionnaire').then((r) => r.json());
+  const answers = {};
+  qs.questions.forEach((x) => { answers[x.id] = x.options[0]; });
+
+  async function submit(contact) {
+    const c = await post('/api/case', { result: 'soft' });
+    const r = await post('/api/delivery', {
+      orderId: c.json.orderId, token: c.json.token, answers, contact
+    });
+    return { caseInfo: c.json, res: r };
+  }
+
+  const a = await submit('line:same-person');
+  assert.strictEqual(a.res.status, 200);
+  const b = await submit('LINE:Same-Person');   // 大小寫不同視為同一人
+  assert.strictEqual(b.res.status, 200);
+
+  const third = await submit('line:  same-person  '); // 夾空白也視為同一人
+  assert.strictEqual(third.res.status, 429, '超過上限應被擋下');
+
+  // 別人不受影響
+  const other = await submit('line:someone-else');
+  assert.strictEqual(other.res.status, 200);
+
+  // 前面那件付款之後，名額釋出
+  await post('/api/demo-pay', { orderId: a.caseInfo.orderId, token: a.caseInfo.token });
+  const afterPaid = await submit('line:same-person');
+  assert.strictEqual(afterPaid.res.status, 200, '已付款的案件不該再佔用名額');
+});

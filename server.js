@@ -38,6 +38,9 @@ const ROOT = __dirname;
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, '');
 const PRICE = 499;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
+// 結果式付費：人工分析發生在收錢之前，所以要限制同一個聯絡方式
+// 同時能有幾件「還沒付款」的案件在跑，否則跑單成本沒有上限。
+const MAX_OPEN_PER_CONTACT = Number(process.env.MAX_OPEN_PER_CONTACT || 2);
 const TRADE_DESC = '第一印象被低估報告';
 const ITEM_NAME = '完整第一印象報告';
 
@@ -154,6 +157,20 @@ function tokenOk(order, token) {
   return crypto.timingSafeEqual(a, b);
 }
 
+// 聯絡方式正規化：大小寫、空白不該讓同一個人被當成兩個人
+function normalizeContact(v) {
+  return String(v || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+// 同一個聯絡方式目前有幾件還沒付款的案件
+function openCasesForContact(contact, excludeId) {
+  const key = normalizeContact(contact);
+  if (!key) return 0;
+  return Object.values(orders).filter(function (o) {
+    return o.id !== excludeId && o.status !== 'paid' && normalizeContact(o.contact) === key;
+  }).length;
+}
+
 // 問卷與照片都到齊 → 進入待分析
 function markSubmittedIfComplete(order) {
   if (order.status === 'open' && order.answers && order.photo) {
@@ -242,6 +259,13 @@ const server = http.createServer(async (req, res) => {
       // 結果式付費：問卷在付款「之前」收，所以這裡不擋未付款
       const contact = String(body.contact || '').trim();
       if (contact.length < 3) return sendJson(res, 400, { ok: false, error: '請留下聯絡方式，報告好了才通知得到你' });
+      // 未付款的案件會佔用人工分析的時間，同一個聯絡方式不能無限排隊
+      if (openCasesForContact(contact, order.id) >= MAX_OPEN_PER_CONTACT) {
+        return sendJson(res, 429, {
+          ok: false,
+          error: '你已經有還在處理中的案件。等上一份報告完成之後再送新的。'
+        });
+      }
       const answersRaw = body.answers || {};
       const answers = {};
       let ok = true;
