@@ -116,6 +116,13 @@
       setCaseId(d.orderId);
 
       if (d.status === 'paid') {
+        // 已付款但報告還沒寫（舊流程留下的案件會是這樣）→ 不要顯示一片空白
+        if (!d.full) {
+          document.getElementById('pending-desc').textContent =
+            '你已經付款了，報告還在製作中。完成後會用你留的方式通知你。';
+          show('pending');
+          return;
+        }
         renderText(document.getElementById('full-text'), d.full);
         show('full-area');
         return;

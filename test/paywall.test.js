@@ -303,3 +303,145 @@ test('真實金流：綠界導回的網址要帶 token，否則付完錢打不�
   assert.ok(backUrl.includes('order=' + c.json.orderId), '導回網址要帶案件編號');
   assert.ok(backUrl.includes('t=' + c.json.token), '導回網址要帶 token，不然付完錢開不了報告');
 });
+
+test('舊的已付款案件還沒有報告時，不能當成已交付', async (t) => {
+  const P6 = 5100 + Math.floor(Math.random() * 300);
+  const B6 = `http://127.0.0.1:${P6}`;
+  const D6 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-paidnorep-'));
+  fs.writeFileSync(path.join(D6, 'orders.json'), JSON.stringify({
+    KC20260101000000009: {
+      id: 'KC20260101000000009', result: 'soft', amount: 499,
+      status: 'paid', contact: 'line:old-customer',
+      answers: { q1: 'a' }, photo: '/uploads/x.png',
+      createdAt: '2026-01-01T00:00:00.000Z'
+    }
+  }, null, 2));
+  const c6 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: { ...process.env, PORT: String(P6), DATA_DIR: D6, ADMIN_TOKEN },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  for (let i = 0; i < 60; i++) {
+    try { await fetch(B6 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  t.after(() => { c6.kill(); fs.rmSync(D6, { recursive: true, force: true }); });
+
+  const admin = (url) => fetch(B6 + url, { headers: { 'x-admin-token': ADMIN_TOKEN } })
+    .then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+
+  // 已付款但沒有報告 → 必須出現在待辦佇列，否則沒人知道還欠他一份
+  const q = await admin('/api/admin/cases');
+  assert.ok(q.json.cases.some((c) => c.id === 'KC20260101000000009'),
+    '已付款但還沒交報告的案件要留在待辦佇列');
+
+  // 報告端點不該假裝已交付
+  const d = await admin('/api/admin/case/KC20260101000000009');
+  const tok = new URL('http://x' + d.json.reportUrl).searchParams.get('t');
+  const rep = await fetch(`${B6}/api/report?order=KC20260101000000009&t=${tok}`).then((r) => r.json());
+  assert.strictEqual(rep.status, 'paid');
+  assert.strictEqual(rep.full, null, '沒寫報告就不該有 full 內容');
+  assert.strictEqual(rep.previewReady, false);
+
+  // 交了報告之後就從待辦佇列消失
+  await fetch(B6 + '/api/admin/report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_TOKEN },
+    body: JSON.stringify({ orderId: 'KC20260101000000009', preview: 'p', full: 'f' })
+  });
+  const q2 = await admin('/api/admin/cases');
+  assert.ok(!q2.json.cases.some((c) => c.id === 'KC20260101000000009'),
+    '交了報告之後就不該再留在待辦佇列');
+});
+
+test('付款重試：每次嘗試的綠界交易編號要不同，且回傳仍對應得回案件', async (t) => {
+  const ecpay = require('../lib/ecpay.js');
+  const KEY = '5294y06JbISpM5x9';
+  const IV = 'v77hoKGq4kWxNNIS';
+  const P7 = 5400 + Math.floor(Math.random() * 300);
+  const B7 = `http://127.0.0.1:${P7}`;
+  const D7 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-retry-'));
+  const c7 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: {
+      ...process.env, PORT: String(P7), DATA_DIR: D7, ADMIN_TOKEN,
+      BASE_URL: 'https://example.com',
+      ECPAY_MERCHANT_ID: '2000132', ECPAY_HASH_KEY: KEY, ECPAY_HASH_IV: IV
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  for (let i = 0; i < 60; i++) {
+    try { await fetch(B7 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  t.after(() => { c7.kill(); fs.rmSync(D7, { recursive: true, force: true }); });
+
+  const post = (url, body, headers) => fetch(B7 + url, {
+    method: 'POST',
+    headers: Object.assign({ 'Content-Type': 'application/json' }, headers || {}),
+    body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+
+  const c = await post('/api/case', { result: 'soft' });
+  await post('/api/admin/report', { orderId: c.json.orderId, preview: 'p', full: 'f' },
+    { 'x-admin-token': ADMIN_TOKEN });
+
+  // 第一次嘗試 → 取消 → 第二次嘗試
+  const a1 = await post('/api/order', { orderId: c.json.orderId, token: c.json.token });
+  const a2 = await post('/api/order', { orderId: c.json.orderId, token: c.json.token });
+  const no1 = a1.json.formFields.MerchantTradeNo;
+  const no2 = a2.json.formFields.MerchantTradeNo;
+  assert.notStrictEqual(no1, no2, '重試時交易編號不能重複，否則綠界會擋成重複訂單');
+  assert.notStrictEqual(no1, c.json.orderId, '交易編號不該直接用案件編號');
+
+  // 用第二次的交易編號回傳付款成功 → 仍要對應回同一個案件
+  const cb = {
+    MerchantID: '2000132', MerchantTradeNo: no2, RtnCode: '1', RtnMsg: 'Succeeded',
+    TradeNo: '2026010100000001', TradeAmt: '499', TotalAmount: '499',
+    PaymentDate: '2026/01/01 00:00:00', PaymentType: 'Credit_CreditCard', TradeDate: '2026/01/01 00:00:00'
+  };
+  cb.CheckMacValue = ecpay.checkMacValue(cb, KEY, IV, 'sha256');
+  const cbRes = await fetch(B7 + '/api/pay-callback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(cb).toString()
+  }).then((r) => r.text());
+  assert.strictEqual(cbRes, '1|OK', '綠界回傳應被接受');
+
+  const after = await fetch(`${B7}/api/order/${c.json.orderId}`).then((r) => r.json());
+  assert.strictEqual(after.status, 'paid', '第二次嘗試的回傳要能把案件標成已付款');
+});
+
+test('LINE 設定好時，送出問卷不能因為通知失敗而 500', async (t) => {
+  const P8 = 5700 + Math.floor(Math.random() * 300);
+  const B8 = `http://127.0.0.1:${P8}`;
+  const D8 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-line-'));
+  const c8 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    // 設了 LINE 就會走 sendLine；用 http.request 打 https 會同步拋錯而讓整個請求 500
+    env: {
+      ...process.env, PORT: String(P8), DATA_DIR: D8, ADMIN_TOKEN,
+      LINE_ACCESS_TOKEN: 'dummy-token', LINE_OWNER_ID: 'U0000000000000000000000000000000'
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  for (let i = 0; i < 60; i++) {
+    try { await fetch(B8 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  t.after(() => { c8.kill(); fs.rmSync(D8, { recursive: true, force: true }); });
+
+  const post = (url, body) => fetch(B8 + url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+
+  const c = await post('/api/case', { result: 'soft' });
+  const qs = await fetch(B8 + '/api/questionnaire').then((r) => r.json());
+  const answers = {};
+  qs.questions.forEach((x) => { answers[x.id] = x.options[0]; });
+
+  await post('/api/delivery', { orderId: c.json.orderId, token: c.json.token, answers, contact: 'line:ken' });
+  // 第二步收齊會觸發 sendLine —— 這一步以前會 500 而且不存檔
+  const up = await post('/api/upload-photo', { orderId: c.json.orderId, token: c.json.token, photo: TINY_PNG });
+  assert.strictEqual(up.status, 200, 'LINE 通知不該讓上傳失敗');
+  assert.strictEqual(up.json.status, 'submitted');
+
+  // 而且要真的存進檔案，不能因為丟例外就跳過 saveOrders
+  const onDisk = JSON.parse(fs.readFileSync(path.join(D8, 'orders.json'), 'utf8'));
+  assert.strictEqual(onDisk[c.json.orderId].status, 'submitted', '狀態要落地');
+  assert.ok(onDisk[c.json.orderId].photo, '照片路徑要落地');
+});

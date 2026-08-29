@@ -76,7 +76,9 @@ const LINE_OWNER_ID = process.env.LINE_OWNER_ID || '';
 function sendLine(text) {
   if (!LINE_ACCESS_TOKEN || !LINE_OWNER_ID) return;
   const body = JSON.stringify({ to: LINE_OWNER_ID, messages: [{ type: 'text', text }] });
-  const req = http.request('https://api.line.me/v2/bot/message/push', {
+  // 必須用 https：http.request 收到 https:// 會同步拋 ERR_INVALID_PROTOCOL，
+  // req.on('error') 攔不到，會讓呼叫端整個 500。
+  const req = https.request('https://api.line.me/v2/bot/message/push', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -142,6 +144,23 @@ migrateLegacyOrders();
 //   preview_ready 報告已寫好，對方可看預覽
 //   atm_pending   ATM 虛擬帳號已產生，尚未入帳
 //   paid          已付款，完整報告解鎖
+// 綠界的 MerchantTradeNo 不能重複。同一個案件可能付款失敗後重試，
+// 所以每次嘗試都要配一組新的，回傳時再對應回案件。
+function newPaymentRef() {
+  const ts = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+  const rand = String(Math.floor(Math.random() * 900) + 100);
+  return 'KP' + ts + rand; // 19 字元 ≤ 20
+}
+
+// 綠界回傳時用交易編號找回案件：先試舊格式（案件編號本身），再查歷次付款嘗試
+function findCaseByTradeNo(no) {
+  if (!no) return null;
+  if (orders[no]) return orders[no];
+  return Object.values(orders).find(function (o) {
+    return Array.isArray(o.paymentRefs) && o.paymentRefs.indexOf(no) !== -1;
+  }) || null;
+}
+
 function createCase(result) {
   const ts = new Date().toISOString().replace(/\D/g, '').slice(0, 14); // 14 位
   const rand = String(Math.floor(Math.random() * 900) + 100);           // 3 位
@@ -367,7 +386,13 @@ const server = http.createServer(async (req, res) => {
       if (!adminOk(req)) return sendJson(res, 403, { error: '無權限' });
       const all = String(new URLSearchParams(u.search).get('all') || '') === '1';
       const list = Object.values(orders)
-        .filter(function (o) { return all || (o.status === 'submitted' || o.status === 'open'); })
+        // 已付款但還沒寫報告的也要列進來（舊流程留下的案件會是這樣），
+        // 否則對方付了錢卻在佇列裡看不到，等於沒人知道還欠他一份報告。
+        .filter(function (o) {
+          if (all) return true;
+          if (o.status === 'submitted' || o.status === 'open') return true;
+          return o.status === 'paid' && !o.preview;
+        })
         .sort(function (a, b) { return String(b.createdAt).localeCompare(String(a.createdAt)); })
         .map(function (o) {
           return {
@@ -440,9 +465,15 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { demo: true, orderId: order.id });
       }
 
+      // 每次付款嘗試配一組新的交易編號，取消後重試才不會被綠界擋成重複
+      const payRef = newPaymentRef();
+      order.paymentRefs = order.paymentRefs || [];
+      order.paymentRefs.push(payRef);
+      saveOrders();
+
       const params = ecpay.buildOrderParams({
         merchantId: ECPAY.merchantId,
-        orderId: order.id,
+        orderId: payRef,
         amount: PRICE,
         tradeDesc: TRADE_DESC,
         itemName: ITEM_NAME,
@@ -465,7 +496,7 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         return res.end('0|CheckMacValue 驗證失敗');
       }
-      const order = orders[params.MerchantTradeNo];
+      const order = findCaseByTradeNo(params.MerchantTradeNo);
       if (!order) {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         return res.end('0|訂單不存在');
