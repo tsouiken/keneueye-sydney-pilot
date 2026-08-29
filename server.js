@@ -447,7 +447,9 @@ const server = http.createServer(async (req, res) => {
         tradeDesc: TRADE_DESC,
         itemName: ITEM_NAME,
         returnUrl: `${BASE_URL}/api/pay-callback`,
-        clientBackUrl: `${BASE_URL}/quiz/success.html?order=${order.id}`,
+        // 帶上 token：success.html 要靠它組出完整報告連結，
+        // 少了它真的付完錢的人會回到一個打不開報告的頁面。
+        clientBackUrl: `${BASE_URL}/quiz/success.html?order=${order.id}&t=${order.token}`,
         alg: ECPAY.alg,
         choosePayment: ECPAY.choosePayment
       });

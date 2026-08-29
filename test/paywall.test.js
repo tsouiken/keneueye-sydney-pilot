@@ -262,3 +262,44 @@ test('舊資料遷移：結果式付費之前的訂單不能被 token 檢查鎖�
   assert.strictEqual(onDisk.KC20260101000000001.token, tok, '補的 token 要寫回檔案');
   assert.strictEqual(onDisk.KC20260101000000002.status, 'open');
 });
+
+test('真實金流：綠界導回的網址要帶 token，否則付完錢打不開報告', async (t) => {
+  const P5 = 4800 + Math.floor(Math.random() * 300);
+  const B5 = `http://127.0.0.1:${P5}`;
+  const D5 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-ecpay-'));
+  // 填入綠界官方測試憑證 → 離開模擬模式，才會產生 ClientBackURL
+  const c5 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: {
+      ...process.env, PORT: String(P5), DATA_DIR: D5, ADMIN_TOKEN,
+      BASE_URL: 'https://example.com',
+      ECPAY_MERCHANT_ID: '2000132',
+      ECPAY_HASH_KEY: '5294y06JbISpM5x9',
+      ECPAY_HASH_IV: 'v77hoKGq4kWxNNIS'
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  for (let i = 0; i < 60; i++) {
+    try { await fetch(B5 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  t.after(() => { c5.kill(); fs.rmSync(D5, { recursive: true, force: true }); });
+
+  const post = (url, body, headers) => fetch(B5 + url, {
+    method: 'POST',
+    headers: Object.assign({ 'Content-Type': 'application/json' }, headers || {}),
+    body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+
+  const health = await fetch(B5 + '/api/health').then((r) => r.json());
+  assert.strictEqual(health.demo, false, '有憑證就不該是模擬模式');
+
+  const c = await post('/api/case', { result: 'soft' });
+  await post('/api/admin/report',
+    { orderId: c.json.orderId, preview: 'p', full: 'f' },
+    { 'x-admin-token': ADMIN_TOKEN });
+
+  const order = await post('/api/order', { orderId: c.json.orderId, token: c.json.token });
+  assert.strictEqual(order.status, 200);
+  const backUrl = order.json.formFields.ClientBackURL;
+  assert.ok(backUrl.includes('order=' + c.json.orderId), '導回網址要帶案件編號');
+  assert.ok(backUrl.includes('t=' + c.json.token), '導回網址要帶 token，不然付完錢開不了報告');
+});
