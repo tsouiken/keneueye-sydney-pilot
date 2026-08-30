@@ -8,16 +8,40 @@ const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
 
-const PORT = 3600 + Math.floor(Math.random() * 300);
-const BASE = `http://127.0.0.1:${PORT}`;
 const ADMIN_TOKEN = 'test-admin-token';
 // 用暫存目錄，測試不寫進 repo
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-paywall-'));
 
-const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-  env: { ...process.env, PORT: String(PORT), DATA_DIR, ADMIN_TOKEN },
-  stdio: ['ignore', 'pipe', 'pipe']
-});
+// 用 PORT=0 讓系統挑一個空的埠，再從 stdout 讀回實際綁到的號碼。
+// 原本每支測試各自在固定範圍 random 一個埠，只要有別的程序（或上一輪
+// 沒收乾淨的 server）佔著就會偶發失敗，而且失敗訊息完全看不出是撞埠。
+// opts.rawEnv：直接用傳進來的 env，不疊 process.env——給那支
+// 「故意不設 DATA_DIR」的測試用的。
+function startServer(env, opts) {
+  const base = (opts && opts.rawEnv) ? { ...env } : { ...process.env, ADMIN_TOKEN, ...env };
+  base.PORT = '0';
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: base,
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const ready = new Promise((resolve, reject) => {
+    let buf = '';
+    const to = setTimeout(() => reject(new Error('server 啟動逾時：' + buf)), 15000);
+    const done = (fn, v) => { clearTimeout(to); child.stdout.removeAllListeners('data'); fn(v); };
+    child.stdout.on('data', (c) => {
+      buf += c;
+      const m = buf.match(/on :(\d+)/);
+      if (m) done(resolve, `http://127.0.0.1:${m[1]}`);
+    });
+    child.once('error', (e) => done(reject, e));
+    child.once('exit', (code) => done(reject, new Error('server 提前結束，code=' + code)));
+  });
+  return { child, ready };
+}
+
+const __base = startServer({ DATA_DIR });
+const child = __base.child;
+let BASE = '';
 
 function req(method, url, body, headers) {
   return fetch(BASE + url, {
@@ -30,9 +54,7 @@ function req(method, url, body, headers) {
 const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 test('結果式付費：完整報告只有付款後才拿得到', async (t) => {
-  for (let i = 0; i < 60; i++) {
-    try { await fetch(BASE + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
-  }
+  BASE = await __base.ready;
   t.after(() => { child.kill(); fs.rmSync(DATA_DIR, { recursive: true, force: true }); });
 
   // 1. 建案件（免費）
@@ -112,16 +134,11 @@ test('結果式付費：完整報告只有付款後才拿得到', async (t) => {
 });
 
 test('後台端點：沒有 ADMIN_TOKEN 一律擋掉', async (t) => {
-  const P2 = 3900 + Math.floor(Math.random() * 300);
-  const B2 = `http://127.0.0.1:${P2}`;
+  let B2;
   const D2 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-admin-'));
-  const c2 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT: String(P2), DATA_DIR: D2, ADMIN_TOKEN },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  for (let i = 0; i < 60; i++) {
-    try { await fetch(B2 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
-  }
+  const __c2 = startServer({ DATA_DIR: D2, ADMIN_TOKEN });
+  const c2 = __c2.child;
+  B2 = await __c2.ready;
   t.after(() => { c2.kill(); fs.rmSync(D2, { recursive: true, force: true }); });
 
   const call = (url, tok) => fetch(B2 + url, { headers: tok ? { 'x-admin-token': tok } : {} })
@@ -157,17 +174,11 @@ test('後台端點：沒有 ADMIN_TOKEN 一律擋掉', async (t) => {
 });
 
 test('跑單防護：同一個聯絡方式不能無限排隊未付款案件', async (t) => {
-  const P3 = 4200 + Math.floor(Math.random() * 300);
-  const B3 = `http://127.0.0.1:${P3}`;
+  let B3;
   const D3 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-ratelimit-'));
-  const c3 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    // 上限設 2：第三件同聯絡方式的未付款案件應被擋下
-    env: { ...process.env, PORT: String(P3), DATA_DIR: D3, ADMIN_TOKEN, MAX_OPEN_PER_CONTACT: '2' },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  for (let i = 0; i < 60; i++) {
-    try { await fetch(B3 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
-  }
+  const __c3 = startServer({ DATA_DIR: D3, ADMIN_TOKEN, MAX_OPEN_PER_CONTACT: '2' });
+  const c3 = __c3.child;
+  B3 = await __c3.ready;
   t.after(() => { c3.kill(); fs.rmSync(D3, { recursive: true, force: true }); });
 
   const post = (url, body, headers) => fetch(B3 + url, {
@@ -207,8 +218,7 @@ test('跑單防護：同一個聯絡方式不能無限排隊未付款案件', as
 });
 
 test('舊資料遷移：結果式付費之前的訂單不能被 token 檢查鎖在門外', async (t) => {
-  const P4 = 4500 + Math.floor(Math.random() * 300);
-  const B4 = `http://127.0.0.1:${P4}`;
+  let B4;
   const D4 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-legacy-'));
 
   // 用舊 schema 寫一份 orders.json：沒有 token，狀態是舊的 pending / paid
@@ -223,13 +233,9 @@ test('舊資料遷移：結果式付費之前的訂單不能被 token 檢查鎖�
     }
   }, null, 2));
 
-  const c4 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT: String(P4), DATA_DIR: D4, ADMIN_TOKEN },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  for (let i = 0; i < 60; i++) {
-    try { await fetch(B4 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
-  }
+  const __c4 = startServer({ DATA_DIR: D4, ADMIN_TOKEN });
+  const c4 = __c4.child;
+  B4 = await __c4.ready;
   t.after(() => { c4.kill(); fs.rmSync(D4, { recursive: true, force: true }); });
 
   const admin = (url) => fetch(B4 + url, { headers: { 'x-admin-token': ADMIN_TOKEN } })
@@ -264,23 +270,12 @@ test('舊資料遷移：結果式付費之前的訂單不能被 token 檢查鎖�
 });
 
 test('真實金流：綠界導回的網址要帶 token，否則付完錢打不開報告', async (t) => {
-  const P5 = 4800 + Math.floor(Math.random() * 300);
-  const B5 = `http://127.0.0.1:${P5}`;
+  let B5;
   const D5 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-ecpay-'));
   // 填入綠界官方測試憑證 → 離開模擬模式，才會產生 ClientBackURL
-  const c5 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: {
-      ...process.env, PORT: String(P5), DATA_DIR: D5, ADMIN_TOKEN,
-      BASE_URL: 'https://example.com',
-      ECPAY_MERCHANT_ID: '2000132',
-      ECPAY_HASH_KEY: '5294y06JbISpM5x9',
-      ECPAY_HASH_IV: 'v77hoKGq4kWxNNIS'
-    },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  for (let i = 0; i < 60; i++) {
-    try { await fetch(B5 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
-  }
+  const __c5 = startServer({ DATA_DIR: D5, ADMIN_TOKEN, BASE_URL: 'https://example.com', ECPAY_MERCHANT_ID: '2000132', ECPAY_HASH_KEY: '5294y06JbISpM5x9', ECPAY_HASH_IV: 'v77hoKGq4kWxNNIS' });
+  const c5 = __c5.child;
+  B5 = await __c5.ready;
   t.after(() => { c5.kill(); fs.rmSync(D5, { recursive: true, force: true }); });
 
   const post = (url, body, headers) => fetch(B5 + url, {
@@ -305,8 +300,7 @@ test('真實金流：綠界導回的網址要帶 token，否則付完錢打不�
 });
 
 test('舊的已付款案件還沒有報告時，不能當成已交付', async (t) => {
-  const P6 = 5100 + Math.floor(Math.random() * 300);
-  const B6 = `http://127.0.0.1:${P6}`;
+  let B6;
   const D6 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-paidnorep-'));
   fs.writeFileSync(path.join(D6, 'orders.json'), JSON.stringify({
     KC20260101000000009: {
@@ -316,13 +310,9 @@ test('舊的已付款案件還沒有報告時，不能當成已交付', async (t
       createdAt: '2026-01-01T00:00:00.000Z'
     }
   }, null, 2));
-  const c6 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT: String(P6), DATA_DIR: D6, ADMIN_TOKEN },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  for (let i = 0; i < 60; i++) {
-    try { await fetch(B6 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
-  }
+  const __c6 = startServer({ DATA_DIR: D6, ADMIN_TOKEN });
+  const c6 = __c6.child;
+  B6 = await __c6.ready;
   t.after(() => { c6.kill(); fs.rmSync(D6, { recursive: true, force: true }); });
 
   const admin = (url) => fetch(B6 + url, { headers: { 'x-admin-token': ADMIN_TOKEN } })
@@ -356,20 +346,11 @@ test('付款重試：每次嘗試的綠界交易編號要不同，且回傳仍�
   const ecpay = require('../lib/ecpay.js');
   const KEY = '5294y06JbISpM5x9';
   const IV = 'v77hoKGq4kWxNNIS';
-  const P7 = 5400 + Math.floor(Math.random() * 300);
-  const B7 = `http://127.0.0.1:${P7}`;
+  let B7;
   const D7 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-retry-'));
-  const c7 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: {
-      ...process.env, PORT: String(P7), DATA_DIR: D7, ADMIN_TOKEN,
-      BASE_URL: 'https://example.com',
-      ECPAY_MERCHANT_ID: '2000132', ECPAY_HASH_KEY: KEY, ECPAY_HASH_IV: IV
-    },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  for (let i = 0; i < 60; i++) {
-    try { await fetch(B7 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
-  }
+  const __c7 = startServer({ DATA_DIR: D7, ADMIN_TOKEN, BASE_URL: 'https://example.com', ECPAY_MERCHANT_ID: '2000132', ECPAY_HASH_KEY: KEY, ECPAY_HASH_IV: IV });
+  const c7 = __c7.child;
+  B7 = await __c7.ready;
   t.after(() => { c7.kill(); fs.rmSync(D7, { recursive: true, force: true }); });
 
   const post = (url, body, headers) => fetch(B7 + url, {
@@ -409,20 +390,11 @@ test('付款重試：每次嘗試的綠界交易編號要不同，且回傳仍�
 });
 
 test('LINE 設定好時，送出問卷不能因為通知失敗而 500', async (t) => {
-  const P8 = 5700 + Math.floor(Math.random() * 300);
-  const B8 = `http://127.0.0.1:${P8}`;
+  let B8;
   const D8 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-line-'));
-  const c8 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    // 設了 LINE 就會走 sendLine；用 http.request 打 https 會同步拋錯而讓整個請求 500
-    env: {
-      ...process.env, PORT: String(P8), DATA_DIR: D8, ADMIN_TOKEN,
-      LINE_ACCESS_TOKEN: 'dummy-token', LINE_OWNER_ID: 'U0000000000000000000000000000000'
-    },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  for (let i = 0; i < 60; i++) {
-    try { await fetch(B8 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
-  }
+  const __c8 = startServer({ DATA_DIR: D8, ADMIN_TOKEN, LINE_ACCESS_TOKEN: 'dummy-token', LINE_OWNER_ID: 'U0000000000000000000000000000000' });
+  const c8 = __c8.child;
+  B8 = await __c8.ready;
   t.after(() => { c8.kill(); fs.rmSync(D8, { recursive: true, force: true }); });
 
   const post = (url, body) => fetch(B8 + url, {
@@ -447,16 +419,11 @@ test('LINE 設定好時，送出問卷不能因為通知失敗而 500', async (t
 });
 
 test('照片大小：前端說 5MB，伺服器就要收得下 5MB（也不能收超過）', async (t) => {
-  const P9 = 6100 + Math.floor(Math.random() * 300);
-  const B9 = `http://127.0.0.1:${P9}`;
+  let B9;
   const D9 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-photo-'));
-  const c9 = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT: String(P9), DATA_DIR: D9, ADMIN_TOKEN },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  for (let i = 0; i < 60; i++) {
-    try { await fetch(B9 + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
-  }
+  const __c9 = startServer({ DATA_DIR: D9, ADMIN_TOKEN });
+  const c9 = __c9.child;
+  B9 = await __c9.ready;
   t.after(() => { c9.kill(); fs.rmSync(D9, { recursive: true, force: true }); });
 
   const post = (url, body) => fetch(B9 + url, {
@@ -491,16 +458,12 @@ test('照片大小：前端說 5MB，伺服器就要收得下 5MB（也不能收
 test('靜態檔白名單：orders.json 與 .env 不能靠 GET 直接下載', async (t) => {
   // DATA_DIR 沒設時（README 的預設）orders.json 就落在專案根目錄，
   // 而根目錄正是靜態檔的來源——等於整道付費牆可以被一個 GET 繞過。
-  const PA = 6400 + Math.floor(Math.random() * 300);
-  const BA = `http://127.0.0.1:${PA}`;
-  const envA = { ...process.env, PORT: String(PA), ADMIN_TOKEN };
+  let BA;
+  const envA = { ...process.env, ADMIN_TOKEN };
   delete envA.DATA_DIR;
-  const ca = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: envA, stdio: ['ignore', 'pipe', 'pipe']
-  });
-  for (let i = 0; i < 60; i++) {
-    try { await fetch(BA + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
-  }
+  const __ca = startServer(envA, { rawEnv: true });
+  const ca = __ca.child;
+  BA = await __ca.ready;
   const ROOT_ORDERS = path.join(__dirname, '..', 'orders.json');
   t.after(() => { ca.kill(); fs.rmSync(ROOT_ORDERS, { force: true }); });
 
@@ -537,15 +500,11 @@ test('靜態檔白名單：orders.json 與 .env 不能靠 GET 直接下載', asy
 });
 
 test('案件送出後不能再改作答或換照片', async (t) => {
-  const PB = 6800 + Math.floor(Math.random() * 300);
-  const BB = `http://127.0.0.1:${PB}`;
+  let BB;
   const DB = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-freeze-'));
-  const cb = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT: String(PB), DATA_DIR: DB, ADMIN_TOKEN }, stdio: ['ignore', 'pipe', 'pipe']
-  });
-  for (let i = 0; i < 60; i++) {
-    try { await fetch(BB + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
-  }
+  const __cb = startServer({ DATA_DIR: DB, ADMIN_TOKEN });
+  const cb = __cb.child;
+  BB = await __cb.ready;
   t.after(() => { cb.kill(); fs.rmSync(DB, { recursive: true, force: true }); });
 
   const post = (url, body) => fetch(BB + url, {
@@ -575,19 +534,11 @@ test('案件送出後不能再改作答或換照片', async (t) => {
 test('付款重試：晚到的 ATM 通知不能把已付款的案件重新鎖起來', async (t) => {
   const ecpayLib = require(path.join(__dirname, '..', 'lib', 'ecpay'));
   const MID = '2000132', KEY = '5294y06JbISpM5x9', IV = 'v77hoKGq4kWxNIMEHK';
-  const PC = 7400 + Math.floor(Math.random() * 300);
-  const BC = `http://127.0.0.1:${PC}`;
+  let BC;
   const DC = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-atm-'));
-  const cc = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: {
-      ...process.env, PORT: String(PC), DATA_DIR: DC, ADMIN_TOKEN,
-      ECPAY_MERCHANT_ID: MID, ECPAY_HASH_KEY: KEY, ECPAY_HASH_IV: IV, ECPAY_CHOOSE_PAYMENT: 'ALL'
-    },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  for (let i = 0; i < 60; i++) {
-    try { await fetch(BC + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
-  }
+  const __cc = startServer({ DATA_DIR: DC, ADMIN_TOKEN, ECPAY_MERCHANT_ID: MID, ECPAY_HASH_KEY: KEY, ECPAY_HASH_IV: IV, ECPAY_CHOOSE_PAYMENT: 'ALL' });
+  const cc = __cc.child;
+  BC = await __cc.ready;
   t.after(() => { cc.kill(); fs.rmSync(DC, { recursive: true, force: true }); });
 
   const post = (url, body) => fetch(BC + url, {
@@ -639,8 +590,7 @@ test('付款重試：晚到的 ATM 通知不能把已付款的案件重新鎖起
 test('舊流程先付款、後補資料的案件，補得進來也拿得到報告', async (t) => {
   // 上一版把「不是 open 就拒絕」寫死，等於把這些已經付過錢、
   // 但還沒交作答與照片的舊案件關在門外——而新的付款後頁面已經沒有那張表單了。
-  const PD = 7800 + Math.floor(Math.random() * 300);
-  const BD = `http://127.0.0.1:${PD}`;
+  let BD;
   const DD = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-legacy-paid-'));
   fs.writeFileSync(path.join(DD, 'orders.json'), JSON.stringify({
     KC19990101000000001: {
@@ -652,12 +602,9 @@ test('舊流程先付款、後補資料的案件，補得進來也拿得到報�
       // 沒有 token、沒有 answers、沒有 photo、沒有 full
     }
   }));
-  const cd = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT: String(PD), DATA_DIR: DD, ADMIN_TOKEN }, stdio: ['ignore', 'pipe', 'pipe']
-  });
-  for (let i = 0; i < 60; i++) {
-    try { await fetch(BD + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
-  }
+  const __cd = startServer({ DATA_DIR: DD, ADMIN_TOKEN });
+  const cd = __cd.child;
+  BD = await __cd.ready;
   t.after(() => { cd.kill(); fs.rmSync(DD, { recursive: true, force: true }); });
 
   const post = (url, body) => fetch(BD + url, {
@@ -697,19 +644,11 @@ test('舊流程先付款、後補資料的案件，補得進來也拿得到報�
 test('交報告不能把 ATM 待付款打回 preview_ready（虛擬帳號還付得進去）', async (t) => {
   const ecpayLib = require(path.join(__dirname, '..', 'lib', 'ecpay'));
   const MID = '2000132', KEY = '5294y06JbISpM5x9', IV = 'v77hoKGq4kWxNIMEHK';
-  const PE = 8200 + Math.floor(Math.random() * 300);
-  const BE = `http://127.0.0.1:${PE}`;
+  let BE;
   const DE = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-atm-edit-'));
-  const ce = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: {
-      ...process.env, PORT: String(PE), DATA_DIR: DE, ADMIN_TOKEN,
-      ECPAY_MERCHANT_ID: MID, ECPAY_HASH_KEY: KEY, ECPAY_HASH_IV: IV, ECPAY_CHOOSE_PAYMENT: 'ALL'
-    },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  for (let i = 0; i < 60; i++) {
-    try { await fetch(BE + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
-  }
+  const __ce = startServer({ DATA_DIR: DE, ADMIN_TOKEN, ECPAY_MERCHANT_ID: MID, ECPAY_HASH_KEY: KEY, ECPAY_HASH_IV: IV, ECPAY_CHOOSE_PAYMENT: 'ALL' });
+  const ce = __ce.child;
+  BE = await __ce.ready;
   t.after(() => { ce.kill(); fs.rmSync(DE, { recursive: true, force: true }); });
 
   const post = (url, body) => fetch(BE + url, {

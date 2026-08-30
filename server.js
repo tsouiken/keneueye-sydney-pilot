@@ -721,5 +721,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`KenEyeCue quiz server on :${PORT} (demo=${DEMO ? 'yes' : 'no'})`);
+  // 印實際綁到的埠而不是 PORT：PORT=0 時由系統挑一個空的，
+  // 測試就不必猜埠號，也不會互相或跟別的程序撞在一起。
+  const bound = server.address().port;
+  console.log(`KenEyeCue quiz server on :${bound} (demo=${DEMO ? 'yes' : 'no'})`);
 });
