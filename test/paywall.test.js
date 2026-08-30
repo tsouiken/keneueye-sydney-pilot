@@ -487,3 +487,151 @@ test('照片大小：前端說 5MB，伺服器就要收得下 5MB（也不能收
   });
   assert.strictEqual(flood.status, 413, '非照片端點維持小上限');
 });
+
+test('靜態檔白名單：orders.json 與 .env 不能靠 GET 直接下載', async (t) => {
+  // DATA_DIR 沒設時（README 的預設）orders.json 就落在專案根目錄，
+  // 而根目錄正是靜態檔的來源——等於整道付費牆可以被一個 GET 繞過。
+  const PA = 6400 + Math.floor(Math.random() * 300);
+  const BA = `http://127.0.0.1:${PA}`;
+  const envA = { ...process.env, PORT: String(PA), ADMIN_TOKEN };
+  delete envA.DATA_DIR;
+  const ca = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: envA, stdio: ['ignore', 'pipe', 'pipe']
+  });
+  for (let i = 0; i < 60; i++) {
+    try { await fetch(BA + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  const ROOT_ORDERS = path.join(__dirname, '..', 'orders.json');
+  t.after(() => { ca.kill(); fs.rmSync(ROOT_ORDERS, { force: true }); });
+
+  const post = (url, body, headers) => fetch(BA + url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...(headers || {}) }, body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+
+  const c = await post('/api/case', { result: 'soft' });
+  const qs = await fetch(BA + '/api/questionnaire').then((r) => r.json());
+  const answers = {};
+  qs.questions.forEach((x) => { answers[x.id] = x.options[0]; });
+  await post('/api/delivery', { orderId: c.json.orderId, token: c.json.token, answers, contact: 'line:secret-contact' });
+  await post('/api/admin/report',
+    { orderId: c.json.orderId, preview: '預覽段', full: '只有付費才該看到的完整報告' },
+    { 'x-admin-token': ADMIN_TOKEN });
+
+  const leak = await fetch(BA + '/orders.json');
+  const body = await leak.text();
+  assert.notStrictEqual(leak.status, 200, 'orders.json 不能被靜態檔服務端出去');
+  assert.ok(!body.includes('只有付費才該看到的完整報告'), '完整報告不得外流');
+  assert.ok(!body.includes(c.json.token), '案件 token 不得外流');
+  assert.ok(!body.includes('line:secret-contact'), '聯絡方式不得外流');
+
+  // 其他不該公開的檔案
+  for (const u of ['/.env', '/server.js', '/package.json', '/test/paywall.test.js', '/lib/ecpay.js']) {
+    const r = await fetch(BA + u);
+    assert.notStrictEqual(r.status, 200, `${u} 不該公開`);
+  }
+  // 該公開的仍要通
+  for (const u of ['/', '/quiz/', '/quiz/quiz.css', '/quiz/report.html']) {
+    const r = await fetch(BA + u);
+    assert.strictEqual(r.status, 200, `${u} 該公開`);
+  }
+});
+
+test('案件送出後不能再改作答或換照片', async (t) => {
+  const PB = 6800 + Math.floor(Math.random() * 300);
+  const BB = `http://127.0.0.1:${PB}`;
+  const DB = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-freeze-'));
+  const cb = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: { ...process.env, PORT: String(PB), DATA_DIR: DB, ADMIN_TOKEN }, stdio: ['ignore', 'pipe', 'pipe']
+  });
+  for (let i = 0; i < 60; i++) {
+    try { await fetch(BB + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  t.after(() => { cb.kill(); fs.rmSync(DB, { recursive: true, force: true }); });
+
+  const post = (url, body) => fetch(BB + url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+
+  const c = await post('/api/case', { result: 'soft' });
+  const { orderId, token } = c.json;
+  const qs = await fetch(BB + '/api/questionnaire').then((r) => r.json());
+  const answers = {};
+  qs.questions.forEach((x) => { answers[x.id] = x.options[0]; });
+
+  assert.strictEqual((await post('/api/delivery', { orderId, token, answers, contact: 'line:ken' })).status, 200);
+  assert.strictEqual((await post('/api/upload-photo', { orderId, token, photo: TINY_PNG })).status, 200);
+  // 這時已是 submitted：報告可能正在寫，改了輸入不會重新排隊
+  const reAnswer = await post('/api/delivery', { orderId, token, answers, contact: 'line:someone-else' });
+  assert.strictEqual(reAnswer.status, 409, '送出後不能再改作答');
+  const rePhoto = await post('/api/upload-photo', { orderId, token, photo: TINY_PNG });
+  assert.strictEqual(rePhoto.status, 409, '送出後不能再換照片');
+
+  // 原本的聯絡方式不能被蓋掉
+  const detail = await fetch(BB + '/api/admin/case/' + orderId, { headers: { 'x-admin-token': ADMIN_TOKEN } })
+    .then((r) => r.json());
+  assert.strictEqual(detail.contact, 'line:ken');
+});
+
+test('付款重試：晚到的 ATM 通知不能把已付款的案件重新鎖起來', async (t) => {
+  const ecpayLib = require(path.join(__dirname, '..', 'lib', 'ecpay'));
+  const MID = '2000132', KEY = '5294y06JbISpM5x9', IV = 'v77hoKGq4kWxNIMEHK';
+  const PC = 7400 + Math.floor(Math.random() * 300);
+  const BC = `http://127.0.0.1:${PC}`;
+  const DC = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-atm-'));
+  const cc = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: {
+      ...process.env, PORT: String(PC), DATA_DIR: DC, ADMIN_TOKEN,
+      ECPAY_MERCHANT_ID: MID, ECPAY_HASH_KEY: KEY, ECPAY_HASH_IV: IV, ECPAY_CHOOSE_PAYMENT: 'ALL'
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  for (let i = 0; i < 60; i++) {
+    try { await fetch(BC + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  t.after(() => { cc.kill(); fs.rmSync(DC, { recursive: true, force: true }); });
+
+  const post = (url, body) => fetch(BC + url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+
+  const c = await post('/api/case', { result: 'soft' });
+  const { orderId, token } = c.json;
+  const qs = await fetch(BC + '/api/questionnaire').then((r) => r.json());
+  const answers = {};
+  qs.questions.forEach((x) => { answers[x.id] = x.options[0]; });
+  await post('/api/delivery', { orderId, token, answers, contact: 'line:ken' });
+  await post('/api/upload-photo', { orderId, token, photo: TINY_PNG });
+  await fetch(BC + '/api/admin/report', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_TOKEN },
+    body: JSON.stringify({ orderId, preview: '預覽', full: '完整報告內容' })
+  });
+
+  // 兩次付款嘗試 → 兩組不同的 MerchantTradeNo
+  const a = await post('/api/order', { orderId, token });
+  const b = await post('/api/order', { orderId, token });
+  const refA = a.json.formFields.MerchantTradeNo;
+  const refB = b.json.formFields.MerchantTradeNo;
+  assert.notStrictEqual(refA, refB, '每次嘗試要有不同的交易編號');
+  assert.ok(refA.length <= 20 && refB.length <= 20, 'MerchantTradeNo 不得超過 20 字元');
+
+  const callback = (fields) => {
+    const params = { MerchantID: MID, TotalAmount: String(499), RtnCode: '1', ...fields };
+    params.CheckMacValue = ecpayLib.checkMacValue(params, KEY, IV, 'sha256');
+    return fetch(BC + '/api/pay-callback', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(params).toString()
+    }).then((r) => r.text());
+  };
+
+  // B 次成功入帳
+  await callback({ MerchantTradeNo: refB, TradeNo: 'TN-B', PaymentDate: '2026/08/30 12:00:00' });
+  let rep = await fetch(BC + `/api/report?order=${orderId}&t=${token}`).then((r) => r.json());
+  assert.strictEqual(rep.status, 'paid');
+  assert.strictEqual(rep.full, '完整報告內容');
+
+  // A 次的虛擬帳號通知才姍姍來遲
+  await callback({ MerchantTradeNo: refA, vAccount: '9998887776', BankCode: '822', ExpireDate: '2026/09/05' });
+  rep = await fetch(BC + `/api/report?order=${orderId}&t=${token}`).then((r) => r.json());
+  assert.strictEqual(rep.status, 'paid', '已付款不能被舊回傳打回 atm_pending');
+  assert.strictEqual(rep.full, '完整報告內容', '完整報告不能被重新鎖起來');
+});

@@ -41,6 +41,13 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
 // 結果式付費：人工分析發生在收錢之前，所以要限制同一個聯絡方式
 // 同時能有幾件「還沒付款」的案件在跑，否則跑單成本沒有上限。
 const MAX_OPEN_PER_CONTACT = Number(process.env.MAX_OPEN_PER_CONTACT || 2);
+// 結果式付費把照片上傳搬到了付款之前，而且不需要聯絡方式就能做。
+// 任何人都能「開案件→拿 token→傳 5MB」重複灌爆持久磁碟，
+// MAX_OPEN_PER_CONTACT 擋不到（那要先過 /api/delivery）。
+const MAX_CASES_PER_IP_HOUR = Number(process.env.MAX_CASES_PER_IP_HOUR || 10);
+const MAX_UPLOADS_PER_IP_HOUR = Number(process.env.MAX_UPLOADS_PER_IP_HOUR || 10);
+// 未付款照片的總量上限（位元組）。到頂就先不收新的，已付款的不算在內。
+const MAX_UNPAID_PHOTO_BYTES = Number(process.env.MAX_UNPAID_PHOTO_BYTES || 200 * 1024 * 1024);
 const TRADE_DESC = '第一印象被低估報告';
 const ITEM_NAME = '完整第一印象報告';
 
@@ -146,10 +153,25 @@ migrateLegacyOrders();
 //   paid          已付款，完整報告解鎖
 // 綠界的 MerchantTradeNo 不能重複。同一個案件可能付款失敗後重試，
 // 所以每次嘗試都要配一組新的，回傳時再對應回案件。
+function tradeNoTaken(no) {
+  if (orders[no]) return true;
+  return Object.values(orders).some(function (o) {
+    return Array.isArray(o.paymentRefs) && o.paymentRefs.indexOf(no) !== -1;
+  });
+}
+
 function newPaymentRef() {
+  // 綠界的 MerchantTradeNo 上限 20 字元：'KP' + 14 碼時間 + 4 碼亂數。
+  // 原本是 3 碼十進位（同一秒只有 900 種）且完全不查碰撞，兩個人同一秒
+  // 結帳就可能拿到同一組，後送的那筆會被綠界當重複退掉。
   const ts = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
-  const rand = String(Math.floor(Math.random() * 900) + 100);
-  return 'KP' + ts + rand; // 19 字元 ≤ 20
+  for (let i = 0; i < 50; i++) {
+    const rand = crypto.randomBytes(4).readUInt32BE(0).toString(36).slice(-4).padStart(4, '0');
+    const ref = 'KP' + ts + rand;
+    if (!tradeNoTaken(ref)) return ref;
+  }
+  // 極端狀況：再加一段亂數換掉時間尾巴，總長仍是 20
+  return 'KP' + ts.slice(0, 10) + crypto.randomBytes(4).toString('hex').slice(0, 8);
 }
 
 // 綠界回傳時用交易編號找回案件：先試舊格式（案件編號本身），再查歷次付款嘗試
@@ -175,7 +197,11 @@ function createCase(result) {
     createdAt: new Date().toISOString()
   };
   saveOrders();
-  fireWebhook('case.created', { orderId: id, result: result || '', amount: PRICE });
+  // 事件名稱維持 order.created：已經上線的 Make router 是照這個名字分支的
+  // （.env.example 與 docs/make-automation.md 都這樣寫）。改名等於讓新名單
+  // 靜悄悄地不再進 Google Sheets。含意有變（現在是免費送件就發，不是結帳），
+  // 文件已補上說明。
+  fireWebhook('order.created', { orderId: id, result: result || '', amount: PRICE });
   return orders[id];
 }
 
@@ -236,19 +262,39 @@ const MIME = {
   '.ico': 'image/x-icon'
 };
 
+// 靜態檔採白名單。ROOT 底下不是每個檔都該讓人下載：DATA_DIR 沒設時
+// orders.json（所有客戶的作答、報告內容、token、聯絡方式）就落在這裡，
+// 旁邊還有 .env、server.js、test/、node_modules/。之前是「除了 API 都給」，
+// 等於 GET /orders.json 就能繞過整道付費牆，順便把 token 一起帶走。
+const PUBLIC_FILES = new Set([
+  'index.html',
+  'enroll.html',
+  'firstimpression.html',
+  'report.html'
+]);
+const PUBLIC_DIRS = ['quiz'];
+
+function isPublicPath(rel) {
+  if (PUBLIC_FILES.has(rel)) return true;
+  return PUBLIC_DIRS.some((d) => rel === d || rel.startsWith(d + '/'));
+}
+
 function serveStatic(req, res, pathname) {
   let rel;
   let base = ROOT;
   // 上傳的照片存在持久磁碟（DATA_DIR/uploads），URL /uploads/* 需從那讀
   if (pathname.startsWith('/uploads/')) {
-    base = DATA_DIR;
-    rel = pathname.replace(/^\/+/, '');
+    base = UPLOAD_DIR;
+    rel = pathname.slice('/uploads/'.length);
   } else if (pathname === '/' || pathname === '') {
     rel = 'index.html';
   } else if (pathname === '/quiz' || pathname === '/quiz/') {
     rel = path.join('quiz', 'index.html');
   } else {
     rel = pathname.replace(/^\/+/, '');
+    if (!isPublicPath(rel)) {
+      res.writeHead(404); res.end('Not Found'); return;
+    }
   }
 
   const file = path.resolve(base, rel);
@@ -293,6 +339,42 @@ function readBody(req, limit = MAX_BODY) {
   });
 }
 
+// 這是成本上限，不是身分驗證：Railway 在 proxy 後面，remoteAddress 永遠是
+// proxy，只剩 X-Forwarded-For 可用，而它是可以偽造的。跟 MAX_OPEN_PER_CONTACT
+// 一樣，目的是讓隨手灌爆的成本變高，不是擋得住有心人。
+function clientIp(req) {
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return xff || req.socket.remoteAddress || 'unknown';
+}
+
+const hitLog = new Map(); // key -> 時間戳陣列
+function rateLimited(key, limit, windowMs) {
+  const now = Date.now();
+  const hits = (hitLog.get(key) || []).filter((t) => now - t < windowMs);
+  if (hits.length >= limit) { hitLog.set(key, hits); return true; }
+  hits.push(now);
+  hitLog.set(key, hits);
+  // 順手清掉過期的鍵，這個 Map 不能無限長大
+  if (hitLog.size > 5000) {
+    for (const [k, v] of hitLog) {
+      if (!v.some((t) => now - t < windowMs)) hitLog.delete(k);
+    }
+  }
+  return false;
+}
+
+// 未付款案件目前佔用的照片位元組數。檔案不多，直接量最誠實。
+function unpaidPhotoBytes() {
+  let total = 0;
+  for (const o of Object.values(orders)) {
+    if (o.status === 'paid' || !o.photo) continue;
+    try {
+      total += fs.statSync(path.join(DATA_DIR, o.photo.replace(/^\/+/, ''))).size;
+    } catch (_) { /* 檔案不在就當 0 */ }
+  }
+  return total;
+}
+
 function sendJson(res, code, obj) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(obj));
@@ -319,7 +401,11 @@ const server = http.createServer(async (req, res) => {
       const order = orders[body.orderId];
       if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
       if (!tokenOk(order, body.token)) return sendJson(res, 403, { ok: false, error: '存取碼不正確' });
-      // 結果式付費：問卷在付款「之前」收，所以這裡不擋未付款
+      // 結果式付費：問卷在付款「之前」收，所以這裡不擋未付款。
+      // 但離開 open 之後就不能再改：報告可能已經照舊答案寫好甚至交出去了。
+      if (order.status !== 'open') {
+        return sendJson(res, 409, { ok: false, error: '這個案件已經送出了，不能再修改作答。' });
+      }
       const contact = String(body.contact || '').trim();
       if (contact.length < 3) return sendJson(res, 400, { ok: false, error: '請留下聯絡方式，報告好了才通知得到你' });
       // 未付款的案件會佔用人工分析的時間，同一個聯絡方式不能無限排隊
@@ -347,10 +433,21 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/upload-photo' && req.method === 'POST') {
+      if (rateLimited('photo:' + clientIp(req), MAX_UPLOADS_PER_IP_HOUR, 3600e3)) {
+        return sendJson(res, 429, { ok: false, error: '短時間內上傳太多次了，請稍後再試。' });
+      }
       const body = JSON.parse((await readBody(req, MAX_PHOTO_BODY)) || '{}');
       const order = orders[body.orderId];
       if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
       if (!tokenOk(order, body.token)) return sendJson(res, 403, { ok: false, error: '存取碼不正確' });
+      // 報告已經在寫或已交出去了，就不能再換照片：換了也不會重新排隊，
+      // 只會讓後台看到的資料跟已交出的報告對不起來。
+      if (order.status !== 'open') {
+        return sendJson(res, 409, { ok: false, error: '這個案件已經送出了，不能再更換照片。' });
+      }
+      if (unpaidPhotoBytes() >= MAX_UNPAID_PHOTO_BYTES) {
+        return sendJson(res, 507, { ok: false, error: '目前排隊的案件太多，請晚點再送。' });
+      }
       const data = body.photo; // data URL 或 base64
       if (typeof data !== 'string' || data.length < 100) return sendJson(res, 400, { ok: false, error: '照片資料無效' });
       const m = data.match(/^data:(image\/\w+);base64,(.+)$/);
@@ -401,6 +498,9 @@ const server = http.createServer(async (req, res) => {
 
     // 建立案件（免費，測驗做完就建）
     if (p === '/api/case' && req.method === 'POST') {
+      if (rateLimited('case:' + clientIp(req), MAX_CASES_PER_IP_HOUR, 3600e3)) {
+        return sendJson(res, 429, { error: '短時間內開太多案件了，請稍後再試。' });
+      }
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = createCase(body.result);
       return sendJson(res, 200, { orderId: order.id, token: order.token });
@@ -535,7 +635,14 @@ const server = http.createServer(async (req, res) => {
         const vAccount = params.vAccount || '';
         const paid = !!(params.PaymentDate && params.PaymentDate !== '');
         if (vAccount && !paid) {
-          // ATM：第一段回傳＝虛擬帳號已產生，尚未轉帳
+          // ATM：第一段回傳＝虛擬帳號已產生，尚未轉帳。
+          // 已付款就不能被打回去：重試付款時，A 次的虛擬帳號通知可能晚於
+          // B 次的成功通知才到，照收會把 paid 覆蓋成 atm_pending，
+          // 等於把客戶已經買到的完整報告重新鎖起來。
+          if (order.status === 'paid') {
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            return res.end('1|OK');
+          }
           order.status = 'atm_pending';
           order.bankCode = params.BankCode || '';
           order.vAccount = params.vAccount;
