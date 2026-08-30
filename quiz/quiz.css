@@ -307,3 +307,165 @@ h2 {
 
 /* ---------- 載入中 ---------- */
 .loading { text-align: center; color: var(--muted); padding: 40px 0; font-size: 14px; }
+
+/* ---------- 品牌立場（首頁） ---------- */
+.stance {
+  margin-top: 28px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+}
+.stance-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.stance-body {
+  font-size: 13px;
+  line-height: 1.85;
+  color: #5c564a;
+}
+
+/* ---------- 結果加厚區塊 ---------- */
+.result-block {
+  margin-bottom: 26px;
+}
+.block-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--gold-deep);
+  margin-bottom: 10px;
+}
+.block-body {
+  font-size: 15px;
+  line-height: 1.85;
+  color: #4a463c;
+}
+.cost-list {
+  list-style: none;
+}
+.cost-list li {
+  display: flex;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #4a463c;
+  padding: 8px 0;
+  border-top: 1px dashed var(--line);
+}
+.cost-list li:first-child { border-top: none; }
+.cost-list li::before {
+  content: "—";
+  color: var(--gold);
+  flex-shrink: 0;
+}
+
+/* ---------- 分享卡 ---------- */
+.share-card {
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 8px;
+  padding: 28px 24px;
+  margin-bottom: 14px;
+  text-align: center;
+}
+.share-card-top {
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 18px;
+}
+.share-card-dim {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: #b8b2a4;
+  margin-bottom: 10px;
+}
+.share-card-line {
+  font-size: 20px;
+  line-height: 1.6;
+  color: var(--paper);
+  margin-bottom: 20px;
+}
+.share-card-foot {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: #8a8578;
+  padding-top: 14px;
+  border-top: 1px solid #333;
+}
+
+.btn-share {
+  margin-bottom: 10px;
+}
+.share-hint {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+/* ---------- 結果式付費：收件、報告、付費牆 ---------- */
+.cta-sub {
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+  margin-top: 10px;
+}
+
+.text-input {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--card);
+  font-size: 15px;
+  color: var(--ink);
+  font-family: inherit;
+}
+.text-input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+.report-body {
+  margin: 24px 0 8px;
+}
+.report-body p {
+  font-size: 15px;
+  line-height: 1.9;
+  color: #4a463c;
+  margin-bottom: 16px;
+}
+
+.paywall {
+  margin-top: 28px;
+  padding: 24px 22px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  /* 上緣淡出，暗示上面那段是接續的 */
+  position: relative;
+}
+.paywall::before {
+  content: "";
+  position: absolute;
+  top: -56px;
+  left: 0;
+  right: 0;
+  height: 56px;
+  background: linear-gradient(to bottom, rgba(250,248,242,0), var(--paper));
+  pointer-events: none;
+}
+.paywall-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--gold-deep);
+  margin-bottom: 14px;
+}

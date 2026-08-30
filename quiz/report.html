@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>你的第一印象報告 — KenEyeCue</title>
+<meta name="description" content="你的第一印象報告。先看內容，再決定要不要解鎖完整版。">
+<link rel="stylesheet" href="quiz.css">
+</head>
+<body>
+<div class="wrap">
+
+  <div class="brand">KenEyeCue</div>
+  <div style="height:36px"></div>
+
+  <div id="loading" class="loading">讀取中…</div>
+
+  <!-- 分析中 -->
+  <div id="pending" style="display:none">
+    <div class="status-box">
+      <div class="status-icon wait">…</div>
+      <h1 class="serif">報告製作中</h1>
+      <p class="lead" id="pending-desc">資料已經收到，我們正在做你的報告。完成後會用你留的方式通知你。</p>
+      <p class="order-id">案件編號：<span class="case-id"></span></p>
+    </div>
+    <p class="fineprint">把這一頁的網址存起來，之後可以直接回來看。</p>
+  </div>
+
+  <!-- 預覽（未付款） -->
+  <div id="preview-area" style="display:none">
+    <p class="kicker">你的報告</p>
+    <h1 class="serif" style="font-size:26px">報告好了。<br>先看這一段。</h1>
+
+    <div class="report-body" id="preview-text"></div>
+
+    <div class="paywall">
+      <p class="paywall-title">後面還有</p>
+      <ul class="include-list">
+        <li>5 層第一印象分析（眉眼結構 × 情境 × 職場 × 社交 × 個人）</li>
+        <li>逐項的具體調整建議</li>
+        <li>依你的 7 題作答做的情境對照</li>
+      </ul>
+      <a id="btn-unlock" class="btn btn-gold" style="margin-top:18px">解鎖完整報告 NT$499</a>
+      <p class="fineprint">你已經看過上面那一段了，再決定要不要解鎖。</p>
+    </div>
+  </div>
+
+  <!-- 完整報告（已付款） -->
+  <div id="full-area" style="display:none">
+    <p class="kicker">完整報告</p>
+    <h1 class="serif" style="font-size:26px">你的第一印象報告</h1>
+    <div class="report-body" id="full-text"></div>
+    <p class="order-id">案件編號：<span class="case-id"></span></p>
+  </div>
+
+  <!-- 錯誤 -->
+  <div id="error-area" style="display:none">
+    <div class="status-box">
+      <h1 class="serif" id="error-title">找不到這份報告</h1>
+      <p class="lead" id="error-desc">請確認網址是否完整，包含後面的存取碼。</p>
+    </div>
+  </div>
+
+  <p class="fineprint">測驗與報告僅供參考，不構成任何保證。</p>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var params = new URLSearchParams(location.search);
+  var orderId = params.get('order') || '';
+  var token = params.get('t') || '';
+
+  function show(id) {
+    ['loading', 'pending', 'preview-area', 'full-area', 'error-area'].forEach(function (k) {
+      document.getElementById(k).style.display = (k === id) ? 'block' : 'none';
+    });
+  }
+
+  function setCaseId(id) {
+    Array.prototype.forEach.call(document.querySelectorAll('.case-id'), function (el) {
+      el.textContent = id;
+    });
+  }
+
+  // 報告內容是純文字，用段落渲染，不用 innerHTML
+  function renderText(el, text) {
+    el.innerHTML = '';
+    String(text || '').split(/\n{2,}/).forEach(function (para) {
+      if (!para.trim()) return;
+      var p = document.createElement('p');
+      p.textContent = para.trim();
+      el.appendChild(p);
+    });
+  }
+
+  function fail(title, desc) {
+    document.getElementById('error-title').textContent = title;
+    document.getElementById('error-desc').textContent = desc;
+    show('error-area');
+  }
+
+  if (!orderId || !token) {
+    fail('網址不完整', '這一頁需要案件編號與存取碼，請用當初收到的完整連結開啟。');
+    return;
+  }
+
+  fetch('/api/report?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token))
+    .then(function (r) {
+      if (r.status === 403) throw new Error('存取碼不正確');
+      if (r.status === 404) throw new Error('找不到這個案件');
+      return r.json();
+    })
+    .then(function (d) {
+      setCaseId(d.orderId);
+
+      if (d.status === 'paid') {
+        // 已付款但報告還沒寫（舊流程留下的案件會是這樣）→ 不要顯示一片空白
+        if (!d.full) {
+          document.getElementById('pending-desc').textContent =
+            '你已經付款了，報告還在製作中。完成後會用你留的方式通知你。';
+          show('pending');
+          return;
+        }
+        renderText(document.getElementById('full-text'), d.full);
+        show('full-area');
+        return;
+      }
+
+      if (d.previewReady) {
+        renderText(document.getElementById('preview-text'), d.preview);
+        document.getElementById('btn-unlock').href =
+          'checkout.html?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token);
+        show('preview-area');
+        return;
+      }
+
+      if (d.status === 'open') {
+        document.getElementById('pending-desc').textContent =
+          '還缺資料。回去把問卷和照片補齊，我們才能開始做。';
+      }
+      show('pending');
+    })
+    .catch(function (err) {
+      fail('讀不到這份報告', err.message || '請稍後再試。');
+    });
+})();
+</script>
+</body>
+</html>

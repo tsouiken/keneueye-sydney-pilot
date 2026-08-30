@@ -49,13 +49,20 @@
   'use strict';
   var params = new URLSearchParams(location.search);
   var dim = params.get('r') || '';
-  var orderId = null;
+  var orderId = params.get('order') || '';
+  var token = params.get('t') || '';
 
   var recap = document.getElementById('recap');
-  if (dim && window.QuizLogic && QuizLogic.RESULTS[dim]) {
-    recap.innerHTML = '你的測驗結果：<strong>' + QuizLogic.RESULTS[dim].title + '</strong> 被低估';
+  if (!orderId || !token) {
+    recap.textContent = '這一頁需要從你的報告頁進來，網址要帶案件編號與存取碼。';
+    var bp = document.getElementById('btn-pay');
+    if (bp) { bp.disabled = true; bp.textContent = '無法付款'; }
   } else {
-    recap.innerHTML = '完成測驗後，可在此解鎖你的完整報告。';
+    // 案件編號來自網址，不能直接塞進 innerHTML
+    recap.textContent = '案件編號：';
+    var strong = document.createElement('strong');
+    strong.textContent = orderId;
+    recap.appendChild(strong);
   }
 
   var btnPay = document.getElementById('btn-pay');
@@ -69,11 +76,18 @@
     fetch('/api/order', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ result: dim })
+      body: JSON.stringify({ orderId: orderId, token: token })
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        orderId = data.orderId;
+        // 已經有一組還沒過期的 ATM 帳號：不要再開第二筆，
+        // 直接帶回付款頁看帳號，兩組都入帳就是收了兩次錢。
+        if (data.status === 'atm_pending' && data.vAccount) {
+          location.href = 'success.html?order=' + encodeURIComponent(orderId) +
+            '&t=' + encodeURIComponent(token);
+          return;
+        }
+        if (data.error) throw new Error(data.error);
         if (data.demo) {
           demoBox.style.display = 'block';
           btnPay.style.display = 'none';
@@ -90,10 +104,10 @@
         });
         ecpayForm.submit();
       })
-      .catch(function () {
+      .catch(function (err) {
         btnPay.disabled = false;
         btnPay.textContent = '前往付款';
-        alert('建立訂單失敗，請稍後再試。');
+        alert(err.message || '建立訂單失敗，請稍後再試。');
       });
   });
 
@@ -103,12 +117,12 @@
     fetch('/api/demo-pay', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderId: orderId })
+      body: JSON.stringify({ orderId: orderId, token: token })
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.ok) {
-          location.href = 'success.html?order=' + orderId;
+          location.href = 'success.html?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token);
         } else {
           alert('模擬付款失敗：' + (data.error || '未知錯誤'));
           btnDemo.disabled = false;

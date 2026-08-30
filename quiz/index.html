@@ -18,7 +18,10 @@
     <h1 class="serif">別人第一眼看到的你，<br>和你真實的樣子，<br>落差在哪？</h1>
     <p class="lead">5 題，30 秒。找出你最容易在第一次見面時，被別人誤讀的那一面。</p>
     <button id="btn-start" class="btn btn-gold">開始測驗</button>
-    <p class="fineprint">不算命、不保證結果，也不是叫你換眉型。</p>
+    <div class="stance">
+      <p class="stance-title">先說清楚我們不做什麼</p>
+      <p class="stance-body">不算命、不預測運勢、不保證結果，也不是叫你去換眉型。這裡只做一件事：把別人第一眼可能誤讀你的地方講清楚，剩下的你自己判斷。</p>
+    </div>
   </section>
 
   <!-- 作答 -->
@@ -42,8 +45,35 @@
     <p class="kicker">你的測驗結果</p>
     <p id="result-line" class="result-line serif"></p>
     <p id="result-desc" class="result-desc"></p>
+
+    <div class="result-block">
+      <h3 class="block-title">別人第一眼讀到什麼</h3>
+      <p id="result-reading" class="block-body"></p>
+    </div>
+
+    <div class="result-block">
+      <h3 class="block-title">這在哪些場合最吃虧</h3>
+      <ul id="result-cost" class="cost-list"></ul>
+    </div>
+
+    <div class="result-block">
+      <h3 class="block-title">而你其實是</h3>
+      <p id="result-truth" class="block-body"></p>
+    </div>
+
     <div id="result-note" class="result-note"></div>
-    <a id="btn-unlock" class="btn btn-gold" href="checkout.html">解鎖完整第一印象報告 NT$499</a>
+
+    <figure class="share-card">
+      <figcaption class="share-card-top">KenEyeCue</figcaption>
+      <p class="share-card-dim" id="share-dim"></p>
+      <p class="share-card-line serif" id="share-line"></p>
+      <p class="share-card-foot">第一印象被低估測驗</p>
+    </figure>
+    <button id="btn-share" class="btn btn-ghost btn-share" type="button">分享這個結果</button>
+    <p id="share-hint" class="share-hint" hidden></p>
+
+    <a id="btn-unlock" class="btn btn-gold" href="submit.html">免費取得你的完整報告</a>
+    <p class="cta-sub">先做出來給你看，看到內容再決定要不要解鎖。</p>
     <p class="fineprint">測驗僅供參考，不構成任何保證。</p>
   </section>
 
@@ -55,6 +85,7 @@
   'use strict';
   var Q = QuizLogic.QUESTIONS;
   var answers = [];
+  var shareText = '';
   var step = 0;
   var selected = null;
 
@@ -107,8 +138,23 @@
     var r = QuizLogic.score(answers);
     document.getElementById('result-line').textContent = r.line;
     document.getElementById('result-desc').textContent = r.desc;
+    document.getElementById('result-reading').textContent = r.reading;
+    document.getElementById('result-truth').textContent = r.truth;
     document.getElementById('result-note').textContent = r.note;
-    document.getElementById('btn-unlock').href = 'checkout.html?r=' + r.dim;
+
+    var costBox = document.getElementById('result-cost');
+    costBox.innerHTML = '';
+    r.cost.forEach(function (item) {
+      var li = document.createElement('li');
+      li.textContent = item;
+      costBox.appendChild(li);
+    });
+
+    document.getElementById('share-dim').textContent = '被低估的是：' + r.title;
+    document.getElementById('share-line').textContent = r.shareLine;
+    shareText = r.shareLine + '\n\n— KenEyeCue 第一印象被低估測驗\n' + location.origin + location.pathname;
+
+    document.getElementById('btn-unlock').href = 'submit.html?r=' + r.dim;
     show('result');
   }
 
@@ -125,6 +171,26 @@
     step += 1;
     if (step >= Q.length) { finish(); return; }
     renderQuestion();
+  });
+
+  document.getElementById('btn-share').addEventListener('click', function () {
+    var hint = document.getElementById('share-hint');
+    function showHint(msg) {
+      hint.textContent = msg;
+      hint.hidden = false;
+    }
+    if (navigator.share) {
+      navigator.share({ text: shareText }).catch(function () { /* 使用者取消，不用提示 */ });
+      return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(shareText).then(
+        function () { showHint('已複製，可以直接貼到限動或訊息裡。'); },
+        function () { showHint('複製失敗，直接截圖上面那張卡片也可以。'); }
+      );
+      return;
+    }
+    showHint('直接截圖上面那張卡片就可以分享。');
   });
 
   document.getElementById('btn-back').addEventListener('click', function () {
