@@ -160,6 +160,14 @@ function tradeNoTaken(no) {
   });
 }
 
+// 繳費期限那天結束前都算還付得進去。讀不出期限就當作仍有效——
+// 寧可擋住重複建立，也不要開出第二組會被重複入帳的帳號。
+function atmExpired(order) {
+  const m = String(order.expireDate || '').match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (!m) return false;
+  return Date.now() > new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59).getTime();
+}
+
 function newPaymentRef() {
   // 綠界的 MerchantTradeNo 上限 20 字元：'KP' + 14 碼時間 + 4 碼亂數。
   // 原本是 3 碼十進位（同一秒只有 900 種）且完全不查碰撞，兩個人同一秒
@@ -197,11 +205,9 @@ function createCase(result) {
     createdAt: new Date().toISOString()
   };
   saveOrders();
-  // 事件名稱維持 order.created：已經上線的 Make router 是照這個名字分支的
-  // （.env.example 與 docs/make-automation.md 都這樣寫）。改名等於讓新名單
-  // 靜悄悄地不再進 Google Sheets。含意有變（現在是免費送件就發，不是結帳），
-  // 文件已補上說明。
-  fireWebhook('order.created', { orderId: id, result: result || '', amount: PRICE });
+  // 這裡不發 order.created。開啟 submit.html 就會呼叫 /api/case，
+  // 在這裡發等於把「有人開了頁面又關掉」也記成一筆潛在名單。
+  // 改在對方真的留下聯絡方式時才發（見 /api/delivery）。
   return orders[id];
 }
 
@@ -240,6 +246,26 @@ function openCasesForContact(contact, excludeId) {
 }
 
 // 問卷與照片都到齊 → 進入待分析
+// 重傳的照片跟已存的是同一張嗎
+function samePhoto(order, buf) {
+  try {
+    const cur = fs.readFileSync(path.join(DATA_DIR, String(order.photo).replace(/^\/+/, '')));
+    return cur.length === buf.length && cur.equals(buf);
+  } catch (_) {
+    return false; // 讀不到舊檔就不能斷定相同
+  }
+}
+
+// 重送的內容跟已收的一模一樣嗎（用來判斷「這是重試」而不是「這是修改」）
+function sameAnswers(order, answers, contact) {
+  if ((order.contact || '') !== contact) return false;
+  const a = order.answers || {};
+  const ka = Object.keys(a).sort();
+  const kb = Object.keys(answers).sort();
+  if (ka.length !== kb.length) return false;
+  return ka.every((k, i) => k === kb[i] && a[k] === answers[k]);
+}
+
 function markSubmittedIfComplete(order) {
   if (!order.answers || !order.photo) return;
   if (order.status === 'open') {
@@ -410,22 +436,9 @@ const server = http.createServer(async (req, res) => {
       const order = orders[body.orderId];
       if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
       if (!tokenOk(order, body.token)) return sendJson(res, 403, { ok: false, error: '存取碼不正確' });
-      // 結果式付費：問卷在付款「之前」收，所以這裡不擋未付款。
-      // 要擋的是「覆蓋掉報告所依據的輸入」，不是「不是 open 就一律拒絕」——
-      // 舊流程是先付款才收資料，那些 paid 但還沒交作答的案件得補得進來，
-      // 而新的付款後頁面已經沒有那張表單了。
-      if (order.answers && order.status !== 'open') {
-        return sendJson(res, 409, { ok: false, error: '這個案件已經送出了，不能再修改作答。' });
-      }
       const contact = String(body.contact || '').trim();
       if (contact.length < 3) return sendJson(res, 400, { ok: false, error: '請留下聯絡方式，報告好了才通知得到你' });
-      // 未付款的案件會佔用人工分析的時間，同一個聯絡方式不能無限排隊
-      if (openCasesForContact(contact, order.id) >= MAX_OPEN_PER_CONTACT) {
-        return sendJson(res, 429, {
-          ok: false,
-          error: '你已經有還在處理中的案件。等上一份報告完成之後再送新的。'
-        });
-      }
+
       const answersRaw = body.answers || {};
       const answers = {};
       let ok = true;
@@ -435,11 +448,42 @@ const server = http.createServer(async (req, res) => {
         answers[q.id] = String(v);
       });
       if (!ok) return sendJson(res, 400, { ok: false, error: '請完成全部 7 題' });
+
+      // 結果式付費：問卷在付款「之前」收，所以這裡不擋未付款。
+      // 要擋的是「覆蓋掉報告所依據的輸入」，不是「不是 open 就一律拒絕」——
+      // 舊流程是先付款才收資料，那些 paid 但還沒交作答的案件得補得進來，
+      // 而新的付款後頁面已經沒有那張表單了。
+      if (order.answers && order.status !== 'open') {
+        // 一模一樣的內容重送＝上傳成功但回應掉了、前端重試。
+        // 這種要當成功處理，否則對方會卡在表單上，而資料其實早就收齊了。
+        if (sameAnswers(order, answers, contact)) {
+          return sendJson(res, 200, { ok: true, orderId: order.id, status: order.status, repeat: true });
+        }
+        return sendJson(res, 409, { ok: false, error: '這個案件已經送出了，不能再修改作答。' });
+      }
+
+      // 未付款的案件會佔用人工分析的時間，同一個聯絡方式不能無限排隊
+      if (openCasesForContact(contact, order.id) >= MAX_OPEN_PER_CONTACT) {
+        return sendJson(res, 429, {
+          ok: false,
+          error: '你已經有還在處理中的案件。等上一份報告完成之後再送新的。'
+        });
+      }
+
+      const firstTime = !order.answers;
       order.answers = answers;
       order.contact = contact;
       order.answersSubmittedAt = new Date().toISOString();
       markSubmittedIfComplete(order);
       saveOrders();
+      // 到這裡對方才真的留下了聯絡方式，這時候才算一筆潛在名單。
+      // 事件名稱維持 order.created：已經上線的 Make router 是照這個名字分支的
+      // （.env.example 與 docs/make-automation.md 都這樣寫）。
+      if (firstTime) {
+        fireWebhook('order.created', {
+          orderId: order.id, result: order.result || '', amount: order.amount, contact
+        });
+      }
       return sendJson(res, 200, { ok: true, orderId: order.id, status: order.status });
     }
 
@@ -451,12 +495,11 @@ const server = http.createServer(async (req, res) => {
       const order = orders[body.orderId];
       if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
       if (!tokenOk(order, body.token)) return sendJson(res, 403, { ok: false, error: '存取碼不正確' });
-      // 同上：擋的是「換掉報告所依據的照片」。還沒有照片的舊 paid 案件
-      // 要補得上來，否則付過錢的人既補不了資料也拿不到報告。
-      if (order.photo && order.status !== 'open') {
-        return sendJson(res, 409, { ok: false, error: '這個案件已經送出了，不能再更換照片。' });
-      }
-      if (unpaidPhotoBytes() >= MAX_UNPAID_PHOTO_BYTES) {
+      // 擋的是「換掉報告所依據的照片」。還沒有照片的舊 paid 案件要補得上來，
+      // 否則付過錢的人既補不了資料也拿不到報告。實際比對放在拿到 buffer 之後。
+      // 配額是給未付款案件用的。已付款案件的照片根本不算在 unpaidPhotoBytes()
+      // 裡面，卻被擋下來的話，付過錢的人就補不完資料也拿不到報告。
+      if (order.status !== 'paid' && unpaidPhotoBytes() >= MAX_UNPAID_PHOTO_BYTES) {
         return sendJson(res, 507, { ok: false, error: '目前排隊的案件太多，請晚點再送。' });
       }
       const data = body.photo; // data URL 或 base64
@@ -467,6 +510,14 @@ const server = http.createServer(async (req, res) => {
       // 前端也擋，但前端擋得住的只有誠實的前端
       if (buf.length > MAX_PHOTO_BYTES) {
         return sendJson(res, 413, { ok: false, error: '照片太大（限 5MB）' });
+      }
+      if (order.photo && order.status !== 'open') {
+        // 一模一樣的照片重傳＝回應掉了、前端重試，當成功處理（冪等）。
+        // 換成另一張才是「修改」，那要擋——報告可能已經照舊照片寫好了。
+        if (samePhoto(order, buf)) {
+          return sendJson(res, 200, { ok: true, photo: order.photo, orderId: order.id, status: order.status, repeat: true });
+        }
+        return sendJson(res, 409, { ok: false, error: '這個案件已經送出了，不能再更換照片。' });
       }
       const ext = m[1] === 'image/png' ? 'png' : 'jpg';
       // 檔名帶 token：/uploads/* 是公開靜態路徑，未付款者的照片也會存在這裡，
@@ -600,6 +651,17 @@ const server = http.createServer(async (req, res) => {
       // 結果式付費：報告預覽出來之前不開放付款
       if (order.status !== 'preview_ready' && order.status !== 'atm_pending') {
         return sendJson(res, 409, { error: '報告尚未完成，還不能付款', status: order.status });
+      }
+      // 已經有一組還沒過期的 ATM 虛擬帳號時，不能再開第二筆：
+      // 舊的那組照樣付得進去，兩邊都入帳就是同一份報告收兩次錢。
+      if (order.status === 'atm_pending' && order.vAccount && !atmExpired(order)) {
+        return sendJson(res, 409, {
+          error: '這筆已經有可以轉帳的虛擬帳號了，請直接轉帳，不要重複建立。',
+          status: 'atm_pending',
+          bankCode: order.bankCode || '',
+          vAccount: order.vAccount,
+          expireDate: order.expireDate || ''
+        });
       }
 
       if (DEMO) {

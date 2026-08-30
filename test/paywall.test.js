@@ -52,6 +52,8 @@ function req(method, url, body, headers) {
 }
 
 const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+// 內容不同的另一張圖，用來區分「換照片」與「同一張重傳」
+const OTHER_PNG = 'data:image/png;base64,' + Buffer.alloc(256, 9).toString('base64');
 
 test('結果式付費：完整報告只有付款後才拿得到', async (t) => {
   BASE = await __base.ready;
@@ -521,9 +523,22 @@ test('案件送出後不能再改作答或換照片', async (t) => {
   assert.strictEqual((await post('/api/upload-photo', { orderId, token, photo: TINY_PNG })).status, 200);
   // 這時已是 submitted：報告可能正在寫，改了輸入不會重新排隊
   const reAnswer = await post('/api/delivery', { orderId, token, answers, contact: 'line:someone-else' });
-  assert.strictEqual(reAnswer.status, 409, '送出後不能再改作答');
-  const rePhoto = await post('/api/upload-photo', { orderId, token, photo: TINY_PNG });
-  assert.strictEqual(rePhoto.status, 409, '送出後不能再換照片');
+  assert.strictEqual(reAnswer.status, 409, '送出後不能改成別的聯絡方式');
+  const otherAnswers = Object.assign({}, answers);
+  otherAnswers[qs.questions[0].id] = qs.questions[0].options[1];
+  const reAnswer2 = await post('/api/delivery', { orderId, token, answers: otherAnswers, contact: 'line:ken' });
+  assert.strictEqual(reAnswer2.status, 409, '送出後不能改作答內容');
+  const rePhoto = await post('/api/upload-photo', { orderId, token, photo: OTHER_PNG });
+  assert.strictEqual(rePhoto.status, 409, '送出後不能換成別張照片');
+
+  // 但一模一樣的重送是「回應掉了、前端重試」，要當成功處理，
+  // 否則資料其實早就收齊了，對方卻卡在表單上出不去。
+  const retryA = await post('/api/delivery', { orderId, token, answers, contact: 'line:ken' });
+  assert.strictEqual(retryA.status, 200, '同樣內容重送＝重試，要放行');
+  assert.strictEqual(retryA.json.repeat, true);
+  const retryP = await post('/api/upload-photo', { orderId, token, photo: TINY_PNG });
+  assert.strictEqual(retryP.status, 200, '同一張照片重傳＝重試，要放行');
+  assert.strictEqual(retryP.json.repeat, true);
 
   // 原本的聯絡方式不能被蓋掉
   const detail = await fetch(BB + '/api/admin/case/' + orderId, { headers: { 'x-admin-token': ADMIN_TOKEN } })
@@ -627,9 +642,11 @@ test('舊流程先付款、後補資料的案件，補得進來也拿得到報�
   assert.strictEqual(up.status, 200, '照片也要補得上來');
   assert.strictEqual(up.json.status, 'paid', '補完資料不能把 paid 降級');
 
-  // 補齊之後才輪到「不能覆蓋」的規則
+  // 補齊之後才輪到「不能覆蓋」的規則——但重試（內容相同）仍要放行
   assert.strictEqual((await post('/api/delivery', { orderId, token, answers, contact: 'line:x' })).status, 409);
-  assert.strictEqual((await post('/api/upload-photo', { orderId, token, photo: TINY_PNG })).status, 409);
+  assert.strictEqual((await post('/api/upload-photo', { orderId, token, photo: OTHER_PNG })).status, 409);
+  assert.strictEqual((await post('/api/delivery', { orderId, token, answers, contact: 'line:paid-legacy' })).status, 200);
+  assert.strictEqual((await post('/api/upload-photo', { orderId, token, photo: TINY_PNG })).status, 200);
 
   // 後台交報告後，付款過的人拿得到完整內容
   await fetch(BD + '/api/admin/report', {
@@ -704,4 +721,116 @@ test('交報告不能把 ATM 待付款打回 preview_ready（虛擬帳號還付�
   rep = await fetch(BE + `/api/report?order=${orderId}&t=${token}`).then((r) => r.json());
   assert.strictEqual(rep.status, 'paid');
   assert.strictEqual(rep.full, '修正版');
+});
+
+test('ATM：已經有可轉帳的虛擬帳號時，不能再開第二筆（同一份報告收兩次錢）', async (t) => {
+  const ecpayLib = require(path.join(__dirname, '..', 'lib', 'ecpay'));
+  const MID = '2000132', KEY = '5294y06JbISpM5x9', IV = 'v77hoKGq4kWxNIMEHK';
+  let BF;
+  const DF = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-atm-dup-'));
+  const __cf = startServer({
+    DATA_DIR: DF, ADMIN_TOKEN,
+    ECPAY_MERCHANT_ID: MID, ECPAY_HASH_KEY: KEY, ECPAY_HASH_IV: IV, ECPAY_CHOOSE_PAYMENT: 'ALL'
+  });
+  const cf = __cf.child;
+  BF = await __cf.ready;
+  t.after(() => { cf.kill(); fs.rmSync(DF, { recursive: true, force: true }); });
+
+  const post = (url, body) => fetch(BF + url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+
+  const c = await post('/api/case', { result: 'soft' });
+  const { orderId, token } = c.json;
+  const qs = await fetch(BF + '/api/questionnaire').then((r) => r.json());
+  const answers = {};
+  qs.questions.forEach((x) => { answers[x.id] = x.options[0]; });
+  await post('/api/delivery', { orderId, token, answers, contact: 'line:ken' });
+  await post('/api/upload-photo', { orderId, token, photo: TINY_PNG });
+  await fetch(BF + '/api/admin/report', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_TOKEN },
+    body: JSON.stringify({ orderId, preview: '預覽', full: '完整' })
+  });
+
+  // 第一次結帳 → 取得虛擬帳號
+  const first = await post('/api/order', { orderId, token });
+  const ref1 = first.json.formFields.MerchantTradeNo;
+  const atm = {
+    MerchantID: MID, TotalAmount: '499', RtnCode: '1', MerchantTradeNo: ref1,
+    vAccount: '9990001111', BankCode: '822',
+    ExpireDate: new Date(Date.now() + 5 * 86400e3).toISOString().slice(0, 10).replace(/-/g, '/')
+  };
+  atm.CheckMacValue = ecpayLib.checkMacValue(atm, KEY, IV, 'sha256');
+  await fetch(BF + '/api/pay-callback', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(atm).toString()
+  });
+
+  // 再點一次「前往付款」→ 不能再開一組
+  const second = await post('/api/order', { orderId, token });
+  assert.strictEqual(second.status, 409, '已有可轉帳的帳號時不能再建立第二筆');
+  assert.strictEqual(second.json.vAccount, '9990001111', '要把現有的帳號帶回去給對方轉');
+  assert.strictEqual(second.json.bankCode, '822');
+
+  // 而且沒有偷偷多記一組交易編號
+  const onDisk = JSON.parse(fs.readFileSync(path.join(DF, 'orders.json'), 'utf8'));
+  assert.strictEqual(onDisk[orderId].paymentRefs.length, 1, '不該多出第二組交易編號');
+
+  // 期限過了才可以重開
+  onDisk[orderId].expireDate = '2020/01/01';
+  fs.writeFileSync(path.join(DF, 'orders.json'), JSON.stringify(onDisk));
+  cf.kill();
+  const __cf2 = startServer({
+    DATA_DIR: DF, ADMIN_TOKEN,
+    ECPAY_MERCHANT_ID: MID, ECPAY_HASH_KEY: KEY, ECPAY_HASH_IV: IV, ECPAY_CHOOSE_PAYMENT: 'ALL'
+  });
+  const BF2 = await __cf2.ready;
+  t.after(() => { __cf2.child.kill(); });
+  const third = await fetch(BF2 + '/api/order', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orderId, token })
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+  assert.strictEqual(third.status, 200, '帳號過期後要能重新建立');
+  assert.notStrictEqual(third.json.formFields.MerchantTradeNo, ref1);
+});
+
+test('潛在名單事件在留下聯絡方式時才發，不是一開頁面就發', async (t) => {
+  // 開啟 submit.html 就會呼叫 /api/case。在那裡發 order.created
+  // 等於把「開了頁面又關掉」也記成一筆名單。
+  const hits = [];
+  const hook = require('node:http').createServer((rq, rs) => {
+    let b = '';
+    rq.on('data', (c) => { b += c; });
+    rq.on('end', () => { try { hits.push(JSON.parse(b)); } catch (_) {} rs.writeHead(200); rs.end('ok'); });
+  });
+  await new Promise((r) => hook.listen(0, '127.0.0.1', r));
+  const hookUrl = `http://127.0.0.1:${hook.address().port}/`;
+
+  const DG = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-hook-'));
+  const __cg = startServer({ DATA_DIR: DG, ADMIN_TOKEN, MAKE_WEBHOOK_URL: hookUrl });
+  const BG = await __cg.ready;
+  t.after(() => { __cg.child.kill(); hook.close(); fs.rmSync(DG, { recursive: true, force: true }); });
+
+  const post = (url, body) => fetch(BG + url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+
+  const c = await post('/api/case', { result: 'soft' });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.strictEqual(hits.filter((h) => h.event === 'order.created').length, 0,
+    '只開了頁面還不算一筆名單');
+
+  const qs = await fetch(BG + '/api/questionnaire').then((r) => r.json());
+  const answers = {};
+  qs.questions.forEach((x) => { answers[x.id] = x.options[0]; });
+  await post('/api/delivery', { orderId: c.json.orderId, token: c.json.token, answers, contact: 'line:ken' });
+  await new Promise((r) => setTimeout(r, 300));
+  const created = hits.filter((h) => h.event === 'order.created');
+  assert.strictEqual(created.length, 1, '留下聯絡方式才算一筆名單');
+  assert.strictEqual(created[0].contact, 'line:ken', '名單要帶得出聯絡方式');
+
+  // 重試不能再發一次
+  await post('/api/delivery', { orderId: c.json.orderId, token: c.json.token, answers, contact: 'line:ken' });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.strictEqual(hits.filter((h) => h.event === 'order.created').length, 1, '重送不該重複記一筆');
 });

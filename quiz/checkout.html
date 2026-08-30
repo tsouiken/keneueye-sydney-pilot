@@ -80,6 +80,13 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
+        // 已經有一組還沒過期的 ATM 帳號：不要再開第二筆，
+        // 直接帶回付款頁看帳號，兩組都入帳就是收了兩次錢。
+        if (data.status === 'atm_pending' && data.vAccount) {
+          location.href = 'success.html?order=' + encodeURIComponent(orderId) +
+            '&t=' + encodeURIComponent(token);
+          return;
+        }
         if (data.error) throw new Error(data.error);
         if (data.demo) {
           demoBox.style.display = 'block';

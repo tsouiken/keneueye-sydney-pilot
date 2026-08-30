@@ -24,7 +24,9 @@ Webhook → Router（依 event 分流）
 |:--|:--|
 | `event` | `order.created` / `order.paid` / `order.atm_pending` |
 
-> `order.created` 的**時機**在結果式付費之後變了：現在是對方送出免費問卷與照片時就發，不再是進到結帳時。事件名稱維持不變，既有的 router 不用動。
+> `order.created` 的**時機**在結果式付費之後變了：現在是對方**送出免費問卷並留下聯絡方式**時就發，不再是進到結帳時。事件名稱維持不變，既有的 router 不用動；payload 多了 `contact`。
+>
+> 刻意不在建立案件（開啟 `submit.html`）時就發——那會把「開了頁面又關掉」也記成一筆名單。
 | `orderId` | 訂單編號（如 `KC20260820225801137`） |
 | `amount` | 金額（499） |
 | `result` | 測驗維度（soft / hard / tired / fierce / scattered） |
