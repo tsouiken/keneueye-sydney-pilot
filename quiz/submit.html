@@ -85,7 +85,17 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ result: dim })
     })
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (d) {
+          // 失敗（例如同 IP 開太多件回 429）不能當成功處理：
+          // 那會把 order=undefined&t=undefined 寫進網址，重新整理之後
+          // 這兩個字串是有值的，ensureCase() 就永遠跳過建案件了。
+          if (!r.ok || !d.orderId || !d.token) {
+            throw new Error(d.error || '目前無法建立案件，請稍後再試。');
+          }
+          return d;
+        });
+      })
       .then(function (d) {
         orderId = d.orderId;
         token = d.token;
@@ -198,7 +208,9 @@
 
   ensureCase()
     .then(loadQuestionnaire)
-    .catch(function () { setMsg('載入失敗，請重新整理。', '#b3261e'); });
+    .catch(function (err) {
+      setMsg(err && err.message ? err.message : '載入失敗，請重新整理。', '#b3261e');
+    });
 })();
 </script>
 </body>

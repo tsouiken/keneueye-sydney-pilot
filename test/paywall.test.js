@@ -635,3 +635,134 @@ test('付款重試：晚到的 ATM 通知不能把已付款的案件重新鎖起
   assert.strictEqual(rep.status, 'paid', '已付款不能被舊回傳打回 atm_pending');
   assert.strictEqual(rep.full, '完整報告內容', '完整報告不能被重新鎖起來');
 });
+
+test('舊流程先付款、後補資料的案件，補得進來也拿得到報告', async (t) => {
+  // 上一版把「不是 open 就拒絕」寫死，等於把這些已經付過錢、
+  // 但還沒交作答與照片的舊案件關在門外——而新的付款後頁面已經沒有那張表單了。
+  const PD = 7800 + Math.floor(Math.random() * 300);
+  const BD = `http://127.0.0.1:${PD}`;
+  const DD = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-legacy-paid-'));
+  fs.writeFileSync(path.join(DD, 'orders.json'), JSON.stringify({
+    KC19990101000000001: {
+      id: 'KC19990101000000001',
+      status: 'paid',            // 舊流程：先收錢
+      amount: 499,
+      result: 'soft',
+      paidAt: '2026-08-01T00:00:00.000Z'
+      // 沒有 token、沒有 answers、沒有 photo、沒有 full
+    }
+  }));
+  const cd = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: { ...process.env, PORT: String(PD), DATA_DIR: DD, ADMIN_TOKEN }, stdio: ['ignore', 'pipe', 'pipe']
+  });
+  for (let i = 0; i < 60; i++) {
+    try { await fetch(BD + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  t.after(() => { cd.kill(); fs.rmSync(DD, { recursive: true, force: true }); });
+
+  const post = (url, body) => fetch(BD + url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+
+  const orderId = 'KC19990101000000001';
+  const migrated = JSON.parse(fs.readFileSync(path.join(DD, 'orders.json'), 'utf8'));
+  const token = migrated[orderId].token;
+  assert.ok(token, '遷移要補上 token');
+  assert.strictEqual(migrated[orderId].status, 'paid', 'paid 不能被遷移改掉');
+
+  const qs = await fetch(BD + '/api/questionnaire').then((r) => r.json());
+  const answers = {};
+  qs.questions.forEach((x) => { answers[x.id] = x.options[0]; });
+
+  const deliv = await post('/api/delivery', { orderId, token, answers, contact: 'line:paid-legacy' });
+  assert.strictEqual(deliv.status, 200, '已付款但還沒交作答的舊案件要補得進來');
+  const up = await post('/api/upload-photo', { orderId, token, photo: TINY_PNG });
+  assert.strictEqual(up.status, 200, '照片也要補得上來');
+  assert.strictEqual(up.json.status, 'paid', '補完資料不能把 paid 降級');
+
+  // 補齊之後才輪到「不能覆蓋」的規則
+  assert.strictEqual((await post('/api/delivery', { orderId, token, answers, contact: 'line:x' })).status, 409);
+  assert.strictEqual((await post('/api/upload-photo', { orderId, token, photo: TINY_PNG })).status, 409);
+
+  // 後台交報告後，付款過的人拿得到完整內容
+  await fetch(BD + '/api/admin/report', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_TOKEN },
+    body: JSON.stringify({ orderId, preview: '預覽', full: '舊案件的完整報告' })
+  });
+  const rep = await fetch(BD + `/api/report?order=${orderId}&t=${token}`).then((r) => r.json());
+  assert.strictEqual(rep.status, 'paid');
+  assert.strictEqual(rep.full, '舊案件的完整報告');
+});
+
+test('交報告不能把 ATM 待付款打回 preview_ready（虛擬帳號還付得進去）', async (t) => {
+  const ecpayLib = require(path.join(__dirname, '..', 'lib', 'ecpay'));
+  const MID = '2000132', KEY = '5294y06JbISpM5x9', IV = 'v77hoKGq4kWxNIMEHK';
+  const PE = 8200 + Math.floor(Math.random() * 300);
+  const BE = `http://127.0.0.1:${PE}`;
+  const DE = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-atm-edit-'));
+  const ce = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: {
+      ...process.env, PORT: String(PE), DATA_DIR: DE, ADMIN_TOKEN,
+      ECPAY_MERCHANT_ID: MID, ECPAY_HASH_KEY: KEY, ECPAY_HASH_IV: IV, ECPAY_CHOOSE_PAYMENT: 'ALL'
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  for (let i = 0; i < 60; i++) {
+    try { await fetch(BE + '/api/health'); break; } catch (_) { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  t.after(() => { ce.kill(); fs.rmSync(DE, { recursive: true, force: true }); });
+
+  const post = (url, body) => fetch(BE + url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+  const saveReport = (orderId, full) => fetch(BE + '/api/admin/report', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_TOKEN },
+    body: JSON.stringify({ orderId, preview: '預覽', full })
+  }).then((r) => r.json());
+
+  const c = await post('/api/case', { result: 'soft' });
+  const { orderId, token } = c.json;
+  const qs = await fetch(BE + '/api/questionnaire').then((r) => r.json());
+  const answers = {};
+  qs.questions.forEach((x) => { answers[x.id] = x.options[0]; });
+  await post('/api/delivery', { orderId, token, answers, contact: 'line:ken' });
+  await post('/api/upload-photo', { orderId, token, photo: TINY_PNG });
+  await saveReport(orderId, '第一版');
+
+  // 對方選 ATM，取得虛擬帳號
+  const ord = await post('/api/order', { orderId, token });
+  const ref = ord.json.formFields.MerchantTradeNo;
+  const params = {
+    MerchantID: MID, TotalAmount: '499', RtnCode: '1', MerchantTradeNo: ref,
+    vAccount: '9998887776', BankCode: '822', ExpireDate: '2026/09/05'
+  };
+  params.CheckMacValue = ecpayLib.checkMacValue(params, KEY, IV, 'sha256');
+  await fetch(BE + '/api/pay-callback', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(params).toString()
+  });
+  let rep = await fetch(BE + `/api/report?order=${orderId}&t=${token}`).then((r) => r.json());
+  assert.strictEqual(rep.status, 'atm_pending');
+  assert.strictEqual(rep.vAccount, '9998887776');
+
+  // 這時我回頭修報告內容
+  await saveReport(orderId, '修正版');
+  rep = await fetch(BE + `/api/report?order=${orderId}&t=${token}`).then((r) => r.json());
+  assert.strictEqual(rep.status, 'atm_pending', '改報告不能把 ATM 待付款狀態洗掉');
+  assert.strictEqual(rep.vAccount, '9998887776', '虛擬帳號要留著，那筆錢還付得進去');
+  assert.strictEqual(rep.bankCode, '822');
+
+  // 轉帳入帳後照樣拿得到修正版
+  const paidParams = {
+    MerchantID: MID, TotalAmount: '499', RtnCode: '1', MerchantTradeNo: ref,
+    vAccount: '9998887776', TradeNo: 'TN-ATM', PaymentDate: '2026/09/01 09:00:00'
+  };
+  paidParams.CheckMacValue = ecpayLib.checkMacValue(paidParams, KEY, IV, 'sha256');
+  await fetch(BE + '/api/pay-callback', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(paidParams).toString()
+  });
+  rep = await fetch(BE + `/api/report?order=${orderId}&t=${token}`).then((r) => r.json());
+  assert.strictEqual(rep.status, 'paid');
+  assert.strictEqual(rep.full, '修正版');
+});

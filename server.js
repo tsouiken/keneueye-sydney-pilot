@@ -241,11 +241,20 @@ function openCasesForContact(contact, excludeId) {
 
 // 問卷與照片都到齊 → 進入待分析
 function markSubmittedIfComplete(order) {
-  if (order.status === 'open' && order.answers && order.photo) {
+  if (!order.answers || !order.photo) return;
+  if (order.status === 'open') {
     order.status = 'submitted';
     order.submittedAt = new Date().toISOString();
     fireWebhook('case.submitted', { orderId: order.id, result: order.result, contact: order.contact || '' });
     sendLine('【KenEyeCue 待分析】\n案件：' + order.id + '\n測驗：' + (order.result || '—') + '\n聯絡：' + (order.contact || '—') + '\n→ 問卷與照片已收齊，可以開始寫報告');
+    return;
+  }
+  // 舊流程是先付款才補資料。狀態不能從 paid 降回 submitted，
+  // 但資料剛收齊一樣要通知——而且這種更該先寫，錢已經收了。
+  if (order.status === 'paid' && !order.full && !order.submittedAt) {
+    order.submittedAt = new Date().toISOString();
+    fireWebhook('case.submitted', { orderId: order.id, result: order.result, contact: order.contact || '' });
+    sendLine('【KenEyeCue 待分析（已付款）】\n案件：' + order.id + '\n測驗：' + (order.result || '—') + '\n聯絡：' + (order.contact || '—') + '\n→ 舊流程的付款案件補齊資料了，請優先寫');
   }
 }
 
@@ -402,8 +411,10 @@ const server = http.createServer(async (req, res) => {
       if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
       if (!tokenOk(order, body.token)) return sendJson(res, 403, { ok: false, error: '存取碼不正確' });
       // 結果式付費：問卷在付款「之前」收，所以這裡不擋未付款。
-      // 但離開 open 之後就不能再改：報告可能已經照舊答案寫好甚至交出去了。
-      if (order.status !== 'open') {
+      // 要擋的是「覆蓋掉報告所依據的輸入」，不是「不是 open 就一律拒絕」——
+      // 舊流程是先付款才收資料，那些 paid 但還沒交作答的案件得補得進來，
+      // 而新的付款後頁面已經沒有那張表單了。
+      if (order.answers && order.status !== 'open') {
         return sendJson(res, 409, { ok: false, error: '這個案件已經送出了，不能再修改作答。' });
       }
       const contact = String(body.contact || '').trim();
@@ -440,9 +451,9 @@ const server = http.createServer(async (req, res) => {
       const order = orders[body.orderId];
       if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
       if (!tokenOk(order, body.token)) return sendJson(res, 403, { ok: false, error: '存取碼不正確' });
-      // 報告已經在寫或已交出去了，就不能再換照片：換了也不會重新排隊，
-      // 只會讓後台看到的資料跟已交出的報告對不起來。
-      if (order.status !== 'open') {
+      // 同上：擋的是「換掉報告所依據的照片」。還沒有照片的舊 paid 案件
+      // 要補得上來，否則付過錢的人既補不了資料也拿不到報告。
+      if (order.photo && order.status !== 'open') {
         return sendJson(res, 409, { ok: false, error: '這個案件已經送出了，不能再更換照片。' });
       }
       if (unpaidPhotoBytes() >= MAX_UNPAID_PHOTO_BYTES) {
@@ -570,7 +581,11 @@ const server = http.createServer(async (req, res) => {
       if (!preview || !full) return sendJson(res, 400, { ok: false, error: 'preview 與 full 都必填' });
       order.preview = preview;
       order.full = full;
-      if (order.status !== 'paid') order.status = 'preview_ready';
+      // paid 不能降級；atm_pending 也不行——虛擬帳號還付得進去，
+      // 打回 preview_ready 會讓對方看不到帳號、被請去重開一筆結帳。
+      if (order.status !== 'paid' && order.status !== 'atm_pending') {
+        order.status = 'preview_ready';
+      }
       order.reportReadyAt = new Date().toISOString();
       saveOrders();
       fireWebhook('case.preview_ready', { orderId: order.id, contact: order.contact || '' });
