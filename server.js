@@ -66,12 +66,13 @@ function fireWebhook(event, payload) {
 }
 
 // LINE 成交通知（用官方帳號 token 直接推給 Ken；留空 = 不發送，不影響既有流程）
-const LINE_ACCESS_TOKEN = process.env.LINE_ACCESS_TOKEN || '';
-const LINE_OWNER_ID = process.env.LINE_OWNER_ID || '';
+const LINE_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
+const KEN_LINE_USER_ID = process.env.KEN_LINE_USER_ID || '';
+const LINE_NOTIFY_ON_DEMO = process.env.LINE_NOTIFY_ON_DEMO === '1';
 function sendLine(text) {
-  if (!LINE_ACCESS_TOKEN || !LINE_OWNER_ID) return;
-  const body = JSON.stringify({ to: LINE_OWNER_ID, messages: [{ type: 'text', text }] });
-  const req = http.request('https://api.line.me/v2/bot/message/push', {
+  if (!LINE_ACCESS_TOKEN || !KEN_LINE_USER_ID) return;
+  const body = JSON.stringify({ to: KEN_LINE_USER_ID, messages: [{ type: 'text', text }] });
+  const req = https.request('https://api.line.me/v2/bot/message/push', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -326,7 +327,7 @@ const server = http.createServer(async (req, res) => {
       order.tradeNo = 'DEMO-' + order.id;
       saveOrders();
       fireWebhook('order.paid', { orderId: order.id, amount: order.amount, result: order.result, tradeNo: order.tradeNo, method: 'DEMO' });
-      sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：DEMO\n→ 準備交付（問卷＋照片＋48h 報告）');
+      if (LINE_NOTIFY_ON_DEMO) sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：DEMO\n→ 準備交付（問卷＋照片＋48h 報告）');
       return sendJson(res, 200, { ok: true, orderId: order.id });
     }
 

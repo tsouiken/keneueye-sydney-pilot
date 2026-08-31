@@ -307,3 +307,118 @@ h2 {
 
 /* ---------- 載入中 ---------- */
 .loading { text-align: center; color: var(--muted); padding: 40px 0; font-size: 14px; }
+
+/* ---------- 命盤董事會：進場引導 ---------- */
+.how-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px 20px;
+  margin-bottom: 28px;
+  font-size: 14px;
+  color: #4a463c;
+}
+.how-card p { margin-bottom: 10px; }
+.how-card p:last-child { margin-bottom: 0; }
+.how-card strong { color: var(--ink); }
+
+/* ---------- 命盤董事會：作答血條（迷你） ---------- */
+.bars-mini {
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.bar-mini {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.bar-mini-label { width: 40px; letter-spacing: 0.12em; flex-shrink: 0; }
+.bar-mini-track {
+  flex: 1;
+  height: 6px;
+  background: var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bar-mini-fill {
+  display: block;
+  height: 100%;
+  width: 4%;
+  background: var(--gold);
+  transition: width 0.3s ease;
+}
+
+/* ---------- 命盤董事會：結果卡 ---------- */
+.result-section-label {
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  color: var(--muted);
+  margin: 26px 0 12px;
+}
+.result-section-label .muted { letter-spacing: 0.05em; }
+
+.board-row { display: flex; flex-direction: column; gap: 12px; }
+.board-member {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--gold);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.board-role { font-size: 18px; font-weight: 700; margin-bottom: 2px; }
+.board-tag { font-size: 13px; color: var(--gold-deep); margin-bottom: 6px; }
+.board-tone { font-size: 13px; color: #4a463c; }
+
+.bars-result { display: flex; flex-direction: column; gap: 10px; }
+.bar-result-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.bar-result-label { width: 40px; letter-spacing: 0.12em; color: var(--muted); flex-shrink: 0; }
+.bar-result-track {
+  flex: 1;
+  height: 8px;
+  background: var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.bar-result-fill {
+  display: block;
+  height: 100%;
+  background: var(--gold);
+  border-radius: 4px;
+}
+.bar-result-val { width: 32px; text-align: right; color: var(--ink); font-weight: 600; }
+
+.collection-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.coll-item {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 14px;
+  text-align: center;
+}
+.coll-item.on { border-color: var(--gold); color: var(--ink); font-weight: 600; }
+.coll-item.locked { color: var(--muted); opacity: 0.75; }
+
+.deep-read {
+  background: #f3efe3;
+  border-left: 2px solid var(--gold);
+  border-radius: 0 6px 6px 0;
+  padding: 18px 18px 22px;
+  margin-top: 30px;
+}
+.deep-read-label {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  color: var(--gold-deep);
+  margin-bottom: 8px;
+}
+.deep-read p { font-size: 14px; color: #5c564a; margin-bottom: 18px; }

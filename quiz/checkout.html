@@ -31,7 +31,7 @@
   </div>
 
   <button id="btn-pay" class="btn btn-gold">前往付款</button>
-  <p class="fineprint">付款完成後，我們會透過 LINE 聯絡你完成後續步驟。<br>測驗與報告僅供參考，不構成任何保證。</p>
+  <p class="fineprint">付款完成後，我們會透過 LINE 聯絡你完成後續步驟。<br>測驗與報告僅供個人參考，請依自己的實際情況判斷。</p>
 
   <div id="demo-box" style="display:none; margin-top:24px;">
     <div class="result-note" style="margin-bottom:12px">
@@ -49,13 +49,21 @@
   'use strict';
   var params = new URLSearchParams(location.search);
   var dim = params.get('r') || '';
+  var fromBoard = params.get('from') === 'board';
   var orderId = null;
 
   var recap = document.getElementById('recap');
-  if (dim && window.QuizLogic && QuizLogic.RESULTS[dim]) {
+  var boardResult = null;
+  try { boardResult = JSON.parse(localStorage.getItem('zw_result')); } catch (_) {}
+  var boardLabel = null;
+  if (fromBoard && boardResult && boardResult.top && boardResult.top.length) {
+    var roleNames = boardResult.top.map(function (s) { return s.role; });
+    boardLabel = '董事會：' + roleNames.join('、');
+    recap.innerHTML = '你的董事會核心：<strong>' + roleNames.join('、') + '</strong>。解鎖後會針對你的眉眼結構做完整校準分析。';
+  } else if (dim && window.QuizLogic && QuizLogic.RESULTS && QuizLogic.RESULTS[dim]) {
     recap.innerHTML = '你的測驗結果：<strong>' + QuizLogic.RESULTS[dim].title + '</strong> 被低估';
   } else {
-    recap.innerHTML = '完成測驗後，可在此解鎖你的完整報告。';
+    recap.innerHTML = '完成董事會後，可在此解鎖你的完整報告。';
   }
 
   var btnPay = document.getElementById('btn-pay');
@@ -69,7 +77,7 @@
     fetch('/api/order', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ result: dim })
+      body: JSON.stringify({ result: boardLabel || (fromBoard ? '董事會' : dim) })
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {

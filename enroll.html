@@ -37,7 +37,7 @@ hr { border: none; border-top: 1px solid #eee; margin: 24px 0; }
 <div class="container">
 
 <h1>KenEyeCue 雪梨 · 報名登記</h1>
-<p class="subtitle">填寫後，Bonnie 會與你聯絡，確認梯次與付款方式。</p>
+<p class="subtitle">填寫後，Bonnie 會與你聯絡，確認梯次與付款方式。送出本表不會產生付款。</p>
 
 <form id="enrollForm">
 <div class="form-group">
@@ -89,10 +89,10 @@ hr { border: none; border-top: 1px solid #eee; margin: 24px 0; }
 <hr>
 
 <div class="form-group">
-<label>意向金 AUD $100（可全額退費）</label>
-<p style="font-size:13px;color:#666;margin-bottom:8px;">先付 $100 意向金保留名額；如果最後決定不參加，可全額退費。</p>
+<label>意向金 AUD $100（登記意願，尚未付款）</label>
+<p style="font-size:13px;color:#666;margin-bottom:8px;">勾選後代表你想在確認梯次後支付 AUD $100 保留名額；送出本表不會扣款。</p>
 <div class="radio-group">
-<div class="radio-item"><input type="radio" name="deposit" value="yes" id="dep-yes"> <label for="dep-yes">我願意付意向金 $100 保留名額</label></div>
+<div class="radio-item"><input type="radio" name="deposit" value="yes" id="dep-yes"> <label for="dep-yes">確認梯次後，我願意付意向金 $100 保留名額</label></div>
 <div class="radio-item"><input type="radio" name="deposit" value="no" id="dep-no"> <label for="dep-no">我想先了解，之後再決定</label></div>
 </div>
 </div>
@@ -106,7 +106,7 @@ hr { border: none; border-top: 1px solid #eee; margin: 24px 0; }
 <button type="submit" class="btn">送出報名登記</button>
 <div id="formStatus" class="status" role="status" aria-live="polite"></div>
 
-<p class="note">送出後，Bonnie 會在 48 小時內與你聯絡。<br>你的資料只用於本次課程報名，不會用於其他用途。</p>
+<p class="note">送出後，Bonnie 會與你確認梯次與付款方式。<br>你的資料只用於本次課程報名，不會用於其他用途。</p>
 </form>
 </div>
 
@@ -134,7 +134,7 @@ form.addEventListener('submit', async function (event) {
 
     form.reset();
     formStatus.className = 'status success';
-    formStatus.textContent = '登記已送出。Bonnie 會在 48 小時內與你聯絡。';
+    formStatus.textContent = '登記已送出，尚未付款。Bonnie 會與你確認梯次與付款方式。';
   } catch (error) {
     formStatus.className = 'status error';
     formStatus.textContent = '目前無法送出，請確認網路後再試一次。你已填寫的資料仍保留在頁面中。';

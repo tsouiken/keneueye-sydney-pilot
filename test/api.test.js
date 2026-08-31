@@ -63,13 +63,16 @@ test('API 完整流程（模擬付款模式）', async (t) => {
   // 7. 靜態頁面可存取
   const quiz = await fetch(BASE + '/quiz/');
   assert.strictEqual(quiz.status, 200);
-  assert.ok((await quiz.text()).includes('第一印象被低估測驗'));
+  assert.ok((await quiz.text()).includes('董事會遊戲'));
 
   const checkout = await fetch(BASE + '/quiz/checkout.html');
   assert.strictEqual(checkout.status, 200);
 
   const logic = await fetch(BASE + '/quiz/quiz-logic.js');
   assert.strictEqual(logic.status, 200);
+
+  const data = await fetch(BASE + '/quiz/quiz-data.js');
+  assert.strictEqual(data.status, 200);
 
   // 8. 路徑穿越防護：URL 正規化後，任何嘗試都讀不到 ROOT 以外的檔案
   const evil = await new Promise((resolve, reject) => {
