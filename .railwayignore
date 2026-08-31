@@ -4,3 +4,4 @@ docs
 test
 orders.json
 *.md
+uploads/
