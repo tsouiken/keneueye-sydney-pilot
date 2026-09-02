@@ -112,7 +112,26 @@ function saveOrders() {
   try { fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2)); } catch (_) { /* 唯讀環境不阻斷 */ }
 }
 
-function createOrder(result) {
+// 董事會資料只存白名單欄位（top 前 3 的 key/role ＋ 四血條），避免塞入任意物件
+function sanitizeBoard(board) {
+  if (!board || typeof board !== 'object' || !Array.isArray(board.top)) return null;
+  return {
+    top: board.top.slice(0, 3).map(function (m) {
+      return {
+        key: String((m && m.key) || '').slice(0, 20),
+        role: String((m && m.role) || '').slice(0, 40)
+      };
+    }),
+    bars: board.bars && typeof board.bars === 'object' ? {
+      B1: Number(board.bars.B1) || 0,
+      B2: Number(board.bars.B2) || 0,
+      B3: Number(board.bars.B3) || 0,
+      B4: Number(board.bars.B4) || 0
+    } : null
+  };
+}
+
+function createOrder(result, board) {
   const ts = new Date().toISOString().replace(/\D/g, '').slice(0, 14); // 14 位
   const rand = String(Math.floor(Math.random() * 900) + 100);           // 3 位
   const id = 'KC' + ts + rand;                                          // 19 字元 ≤ 20
@@ -121,12 +140,13 @@ function createOrder(result) {
     id,
     token,
     result: result || '',
+    board: board || null,
     amount: PRICE,
     status: 'pending',
     createdAt: new Date().toISOString()
   };
   saveOrders();
-  fireWebhook('order.created', { orderId: id, result: result || '', amount: PRICE });
+  fireWebhook('order.created', { orderId: id, result: result || '', board: board || null, amount: PRICE });
   return orders[id];
 }
 
@@ -214,6 +234,14 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
+// 訂單授權：token 上線前的舊訂單（無 token）維持以 orderId 為憑證，
+// 新訂單一律要求高熵 token（錯 token 視為不存在，防列舉）
+function orderAuthorized(order, token) {
+  if (!order) return false;
+  if (!order.token) return true;
+  return safeEqual(order.token, token);
+}
+
 function sendJson(res, code, obj) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(obj));
@@ -238,7 +266,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/delivery' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order || !safeEqual(order.token, body.token)) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
+      if (!orderAuthorized(order, body.token)) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
       if (order.status !== 'paid') return sendJson(res, 400, { ok: false, error: '訂單尚未付款' });
       const answersRaw = body.answers || {};
       const answers = {};
@@ -258,7 +286,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/upload-photo' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order || !safeEqual(order.token, body.token)) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
+      if (!orderAuthorized(order, body.token)) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
       if (order.status !== 'paid') return sendJson(res, 400, { ok: false, error: '訂單尚未付款' });
       const data = body.photo; // data URL 或 base64
       if (typeof data !== 'string' || data.length < 100) return sendJson(res, 400, { ok: false, error: '照片資料無效' });
@@ -276,7 +304,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/report' && req.method === 'GET') {
       const qs = new URLSearchParams(u.search);
       const order = orders[qs.get('order') || ''];
-      if (!order || !safeEqual(order.token, qs.get('token') || '')) return sendJson(res, 404, { error: '訂單不存在' });
+      if (!orderAuthorized(order, qs.get('token') || '')) return sendJson(res, 404, { error: '訂單不存在' });
       return sendJson(res, 200, {
         orderId: order.id,
         status: order.status,
@@ -363,7 +391,7 @@ const server = http.createServer(async (req, res) => {
       if (!DEMO) return sendJson(res, 403, { ok: false, error: '未開放模擬付款' });
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order || !safeEqual(order.token, body.token)) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
+      if (!orderAuthorized(order, body.token)) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
       order.status = 'paid';
       order.paidAt = new Date().toISOString();
       order.tradeNo = 'DEMO-' + order.id;
@@ -377,7 +405,7 @@ const server = http.createServer(async (req, res) => {
     if (orderMatch && req.method === 'GET') {
       const order = orders[orderMatch[1]];
       const token = new URLSearchParams(u.search).get('token') || '';
-      if (!order || !safeEqual(order.token, token)) return sendJson(res, 404, { error: '訂單不存在' });
+      if (!orderAuthorized(order, token)) return sendJson(res, 404, { error: '訂單不存在' });
       return sendJson(res, 200, { id: order.id, status: order.status, amount: order.amount, result: order.result });
     }
 

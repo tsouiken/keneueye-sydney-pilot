@@ -46,7 +46,7 @@
         { key: 'a', label: '當場拍桌，把功勞討回來',       stars: { qisha: 3, wuqu: 1 },   bars: { B1: 2, B3: 1 } },
         { key: 'b', label: '先忍住，多數場合順著走',       stars: { tianfu: 3, tianxiang: 1 }, bars: { B1: -1, B3: -1 } },
         { key: 'c', label: '繞過他們，直接去找上面的人',   stars: { taiyang: 2, jumen: 2 },  bars: { B1: 1, B2: 1 } },
-        { key: 'd', label: '先觀察是不是自己誤會了',       stars: { tianji: 3, taiyin: 1 },  bars: { B2: -1, B4: 1 } }
+        { key: 'd', label: '先觀察是不是自己誤會了',       stars: { tianji: 2, ziwei: 2 },  bars: { B2: -1, B4: 1 } }
       ]
     },
     {
@@ -62,7 +62,7 @@
       id: 3, prompt: '被逼表態：「你現在就要站隊」，你？',
       options: [
         { key: 'a', label: '站就站，我選對邊',             stars: { qisha: 2, wuqu: 2 },   bars: { B1: 1, B4: 1 } },
-        { key: 'b', label: '講道理，兩邊都不得罪',         stars: { tianxiang: 3, tianji: 1 }, bars: { B3: -1, B4: 1 } },
+        { key: 'b', label: '講道理，兩邊都不得罪',         stars: { tianxiang: 2, ziwei: 2 }, bars: { B3: -1, B4: 1 } },
         { key: 'c', label: '用拖的，拖到大家都想清楚',     stars: { taiyin: 3, tianliang: 1 }, bars: { B2: -1, B4: 1 } },
         { key: 'd', label: '反過來質問他們憑什麼逼我',     stars: { lianzhen: 3, jumen: 1 }, bars: { B3: 2 } }
       ]
@@ -70,7 +70,7 @@
     {
       id: 4, prompt: '機會突然降臨，你有三天決定，你？',
       options: [
-        { key: 'a', label: '先接了再說，船到橋頭自然直',   stars: { tanlang: 3, pojun: 1 }, bars: { B2: 1, B4: 1 } },
+        { key: 'a', label: '先接了再說，船到橋頭自然直',   stars: { tanlang: 2, pojun: 2 }, bars: { B2: 1, B4: 1 } },
         { key: 'b', label: '熬夜把利弊全想過一遍',         stars: { tianji: 3, lianzhen: 1 }, bars: { B4: 2 } },
         { key: 'c', label: '找信任的人問一圈',             stars: { tianliang: 2, taiyang: 2 }, bars: { B2: 1, B4: -1 } },
         { key: 'd', label: '看誰搶得過我，直接下手',       stars: { qisha: 2, wuqu: 2 },   bars: { B1: 2, B4: 1 } }
@@ -90,7 +90,7 @@
       options: [
         { key: 'a', label: '馬上澄清，講到我被聽見',       stars: { taiyang: 3, jumen: 1 }, bars: { B1: 1, B2: 1 } },
         { key: 'b', label: '先安靜，等風波過去再說',       stars: { taiyin: 3, tianliang: 1 }, bars: { B2: -2 } },
-        { key: 'c', label: '自嘲帶過，我最會自黑',         stars: { tanlang: 3, tiantong: 1 }, bars: { B2: 1, B3: -1 } },
+        { key: 'c', label: '自嘲帶過，我最會自黑',         stars: { tanlang: 2, pojun: 2 }, bars: { B2: 1, B3: -1 } },
         { key: 'd', label: '算帳，是誰在背後弄我',         stars: { qisha: 3, lianzhen: 1 }, bars: { B1: 2, B3: 1 } }
       ]
     },
@@ -99,8 +99,8 @@
       options: [
         { key: 'a', label: '別人眼光',                     stars: { taiyang: 3, taiyin: 1 }, bars: { B2: 2 } },
         { key: 'b', label: '自己太衝，做錯決定',            stars: { lianzhen: 3, qisha: 1 }, bars: { B3: 1, B1: -1 } },
-        { key: 'c', label: '太安於現狀，不敢跨',            stars: { tianliang: 3, tiantong: 1 }, bars: { B4: -1, B1: -1 } },
-        { key: 'd', label: '太想做太多事，卻不深入',        stars: { tanlang: 3, tianji: 1 }, bars: { B2: 1, B4: 1 } }
+        { key: 'c', label: '太安於現狀，不敢跨',            stars: { tianliang: 2, ziwei: 2 }, bars: { B4: -1, B1: -1 } },
+        { key: 'd', label: '太想做太多事，卻不深入',        stars: { tanlang: 2, pojun: 2 }, bars: { B2: 1, B4: 1 } }
       ]
     }
   ];
