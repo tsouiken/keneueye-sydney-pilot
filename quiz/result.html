@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>你的董事會 — KenEyeCue</title>
+<meta name="description" content="看看現在是誰在替你開會，以及你最容易忽略的決策傾向。">
+<link rel="stylesheet" href="quiz.css">
+</head>
+<body>
+<div class="wrap">
+
+  <section id="screen-result" class="screen active">
+    <div class="brand">KenEyeCue</div>
+    <div style="height:28px"></div>
+    <p class="kicker">你的董事會結果</p>
+    <h1 class="serif" id="result-headline">正在替你開會…</h1>
+    <p id="result-desc" class="result-desc"></p>
+
+    <!-- 前 3 董事 -->
+    <div id="top-board" class="board-row"></div>
+
+    <!-- 四血條：決策模式傾向 -->
+    <div style="height:8px"></div>
+    <div class="result-section-label">你的四種決策傾向</div>
+    <div id="bars-result" class="bars-result"></div>
+
+    <!-- 收藏：14 位成員 -->
+    <div class="result-section-label">董事會成員 <span id="coll-count" class="muted">0 / 14</span></div>
+    <div id="collection" class="collection-grid"></div>
+    <p class="fineprint">還沒出場的成員 🔒 重玩會開啟——換一套選擇，董事會就不同。</p>
+
+    <!-- 半遮蔽深入解讀（唯一付費點） -->
+    <div id="deep-read" class="deep-read">
+      <span class="deep-read-label">深入解讀</span>
+      <p id="deep-text"></p>
+      <a id="btn-unlock" class="btn btn-gold" href="checkout.html?from=board">解鎖完整第一印象報告 NT$499</a>
+      <p class="fineprint">解鎖後：5 層分析、7 題問卷、眉眼觀察、個人化調整建議。</p>
+    </div>
+
+    <!-- 分享 / PK -->
+    <div class="quiz-actions">
+      <button id="btn-share" class="btn btn-ghost">分享我這份董事會</button>
+      <button id="btn-pk" class="btn btn-ghost">邀請朋友 PK</button>
+    </div>
+
+  </section>
+
+</div>
+
+<script src="quiz-data.js"></script>
+<script src="quiz-logic.js"></script>
+<script src="track.js"></script>
+<script>
+(function () {
+  'use strict';
+  var data = null;
+  try { data = JSON.parse(localStorage.getItem('zw_result')); } catch (_) {}
+  if (!data || !data.top || !data.top.length) {
+    document.getElementById('screen-result').innerHTML =
+      '<p class="loading">還沒有結果。先去玩一輪，再回來看誰在替你開會。</p>' +
+      '<a class="btn btn-gold" href="index.html">回去玩</a>';
+    return;
+  }
+
+  var byKey = {};
+  QuizLogic.STARS.forEach(function (s) { byKey[s.key] = s; });
+
+  function roleName(s) { return (byKey[s.key] || {}).role || ''; }
+
+  // 收藏採跨重玩累積：本次解鎖 ＋ 歷史收藏聯集，並存回 zw_unlocked
+  // （避免每輪只用 top3 覆寫 zw_result，讓已開啟的成員又鎖回去）
+  function loadUnlocked() {
+    var set = {};
+    (data.unlocked || []).forEach(function (k) { set[k] = true; });
+    var hist = [];
+    try { hist = JSON.parse(localStorage.getItem('zw_unlocked') || '[]'); } catch (_) {}
+    (Array.isArray(hist) ? hist : []).forEach(function (k) { set[k] = true; });
+    var keys = Object.keys(set);
+    try { localStorage.setItem('zw_unlocked', JSON.stringify(keys)); } catch (_) {}
+    return keys;
+  }
+  var unlockedArr = loadUnlocked();
+
+  // 主標：第一名角色名（對外只用角色，不用星名）
+  var t0 = data.top[0];
+  document.getElementById('result-headline').textContent =
+    '現在，是「' + roleName(t0) + '」在替你開會。';
+  document.getElementById('result-desc').textContent =
+    '你這次的董事會權力核心：' + data.top.map(roleName).join('、') + '。換一套選擇，下次可能是別人。';
+
+  // 前 3
+  var board = document.getElementById('top-board');
+  data.top.forEach(function (s) {
+    var st = byKey[s.key];
+    var el = document.createElement('div');
+    el.className = 'board-member';
+    el.innerHTML = '<div class="board-role">' + st.role + '</div>' +
+      '<div class="board-tag">' + st.tag + '</div>' +
+      '<div class="board-tone">' + st.tone + '</div>';
+    board.appendChild(el);
+  });
+
+  // 四血條（0–100）
+  var br = document.getElementById('bars-result');
+  QuizLogic.BARS.forEach(function (b) {
+    var v = data.bars[b.key];
+    var row = document.createElement('div');
+    row.className = 'bar-result-row';
+    row.innerHTML = '<span class="bar-result-label">' + b.label + '</span>' +
+      '<span class="bar-result-track"><span class="bar-result-fill" style="width:' + v + '%"></span></span>' +
+      '<span class="bar-result-val">' + v + '</span>';
+    br.appendChild(row);
+  });
+
+  // 收藏：14 位角色，只有解鎖的亮起來
+  var coll = document.getElementById('collection');
+  var unlockedCount = 0;
+  QuizLogic.STARS.forEach(function (s) {
+    var on = unlockedArr.indexOf(s.key) !== -1;
+    if (on) unlockedCount++;
+    var el = document.createElement('div');
+    el.className = 'coll-item' + (on ? ' on' : ' locked');
+    el.innerHTML = on ? s.role : '🔒 ' + s.role;
+    coll.appendChild(el);
+  });
+  document.getElementById('coll-count').textContent = unlockedCount + ' / 14';
+
+  // 半遮蔽深入解讀
+  var deep = document.getElementById('deep-text');
+  var t0star = byKey[t0.key];
+  var full = t0star.role + '在象徵上，傾向於' + t0star.tone;
+  deep.textContent = full.slice(0, 14) + ' …';
+
+  // 埋點
+  track('result_view', { top: t0.key });
+  document.getElementById('btn-unlock').addEventListener('click', function () {
+    track('cta_click', { top: t0.key });
+  });
+
+  document.getElementById('btn-share').addEventListener('click', function () {
+    track('share', { top: t0.key });
+    var text = '我的董事會正由「' + roleName(t0) + '」主導。你也來看看，現在是誰在替你開會？';
+    if (navigator.share) {
+      navigator.share({ text: text, url: location.origin + '/quiz/' }).catch(function () {});
+    } else {
+      try { navigator.clipboard.writeText(text + ' ' + location.origin + '/quiz/'); } catch (_) {}
+      alert('已複製邀請文字，貼給朋友就行。');
+    }
+  });
+
+  document.getElementById('btn-pk').addEventListener('click', function () {
+    track('pk_start', { top: t0.key });
+    var text = '我開會的人馬是「' + roleName(t0) + '」，你敢不敢跟我對決？來玩：';
+    if (navigator.share) {
+      navigator.share({ title: '董事會 PK', text: text, url: location.origin + '/quiz/' }).catch(function () {});
+    } else {
+      try { navigator.clipboard.writeText(text + ' ' + location.origin + '/quiz/'); } catch (_) {}
+      alert('已複製邀請，朋友玩完就能跟你比誰在開會。');
+    }
+  });
+})();
+</script>
+</body>
+</html>

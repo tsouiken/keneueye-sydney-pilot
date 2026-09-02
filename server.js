@@ -13,11 +13,14 @@
  *   GET  /api/health          → 健康檢查
  *
  * 安全：所有憑證只從環境變數讀取；回傳驗證金額；不輸出任何 Secret。
+ *       客戶端敏感端點一律需帶高熵 token（建立訂單時產生，等同訂單存取憑證）。
+ *       靜態檔只服務白名單公開檔案，禁止讀取 orders.json / .env / 程式碼等。
  */
 'use strict';
 
 const http = require('http');
 const https = require('https');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
@@ -66,12 +69,13 @@ function fireWebhook(event, payload) {
 }
 
 // LINE 成交通知（用官方帳號 token 直接推給 Ken；留空 = 不發送，不影響既有流程）
-const LINE_ACCESS_TOKEN = process.env.LINE_ACCESS_TOKEN || '';
-const LINE_OWNER_ID = process.env.LINE_OWNER_ID || '';
+const LINE_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
+const KEN_LINE_USER_ID = process.env.KEN_LINE_USER_ID || '';
+const LINE_NOTIFY_ON_DEMO = process.env.LINE_NOTIFY_ON_DEMO === '1';
 function sendLine(text) {
-  if (!LINE_ACCESS_TOKEN || !LINE_OWNER_ID) return;
-  const body = JSON.stringify({ to: LINE_OWNER_ID, messages: [{ type: 'text', text }] });
-  const req = http.request('https://api.line.me/v2/bot/message/push', {
+  if (!LINE_ACCESS_TOKEN || !KEN_LINE_USER_ID) return;
+  const body = JSON.stringify({ to: KEN_LINE_USER_ID, messages: [{ type: 'text', text }] });
+  const req = https.request('https://api.line.me/v2/bot/message/push', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -108,19 +112,41 @@ function saveOrders() {
   try { fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2)); } catch (_) { /* 唯讀環境不阻斷 */ }
 }
 
-function createOrder(result) {
+// 董事會資料只存白名單欄位（top 前 3 的 key/role ＋ 四血條），避免塞入任意物件
+function sanitizeBoard(board) {
+  if (!board || typeof board !== 'object' || !Array.isArray(board.top)) return null;
+  return {
+    top: board.top.slice(0, 3).map(function (m) {
+      return {
+        key: String((m && m.key) || '').slice(0, 20),
+        role: String((m && m.role) || '').slice(0, 40)
+      };
+    }),
+    bars: board.bars && typeof board.bars === 'object' ? {
+      B1: Number(board.bars.B1) || 0,
+      B2: Number(board.bars.B2) || 0,
+      B3: Number(board.bars.B3) || 0,
+      B4: Number(board.bars.B4) || 0
+    } : null
+  };
+}
+
+function createOrder(result, board) {
   const ts = new Date().toISOString().replace(/\D/g, '').slice(0, 14); // 14 位
   const rand = String(Math.floor(Math.random() * 900) + 100);           // 3 位
   const id = 'KC' + ts + rand;                                          // 19 字元 ≤ 20
+  const token = crypto.randomBytes(24).toString('hex');                 // 高熵訂單存取憑證
   orders[id] = {
     id,
+    token,
     result: result || '',
+    board: board || null,
     amount: PRICE,
     status: 'pending',
     createdAt: new Date().toISOString()
   };
   saveOrders();
-  fireWebhook('order.created', { orderId: id, result: result || '', amount: PRICE });
+  fireWebhook('order.created', { orderId: id, result: result || '', board: board || null, amount: PRICE });
   return orders[id];
 }
 
@@ -137,6 +163,17 @@ const MIME = {
   '.ico': 'image/x-icon'
 };
 
+// 白名單：只服務明確公開的根目錄頁面與 quiz/ 資源，其餘一律 404
+// （避免 /orders.json、/.env、/server.js、/package.json、test/、docs/ 等被直接讀取）
+function isPublicStatic(rel, pathname) {
+  if (pathname === '/' || pathname === '') return true;
+  if (pathname === '/quiz' || pathname === '/quiz/') return true;
+  const ROOT_PAGES = new Set(['index.html', 'firstimpression.html', 'enroll.html', 'report.html']);
+  if (ROOT_PAGES.has(rel)) return true;
+  if (/^quiz\/[A-Za-z0-9._-]+$/.test(rel) && /\.(html|css|js|png|jpg|jpeg|svg|ico)$/.test(rel)) return true;
+  return false;
+}
+
 function serveStatic(req, res, pathname) {
   let rel;
   let base = ROOT;
@@ -150,6 +187,9 @@ function serveStatic(req, res, pathname) {
     rel = path.join('quiz', 'index.html');
   } else {
     rel = pathname.replace(/^\/+/, '');
+    if (!isPublicStatic(rel, pathname)) {
+      res.writeHead(404); res.end('Not Found'); return;
+    }
   }
 
   const file = path.resolve(base, rel);
@@ -164,13 +204,42 @@ function serveStatic(req, res, pathname) {
 }
 
 // ---------- 工具 ----------
+// 交付頁收 data URL 照片，上限標示 5MiB；base64＋JSON 包裝後約 ×1.38，
+// 故本體上限取 8MiB（超限回 413，不砍連線讓客戶掛著）
+const MAX_BODY = 8 * 1024 * 1024;
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let raw = '';
-    req.on('data', (c) => { raw += c; if (raw.length > 1e6) req.destroy(); });
-    req.on('end', () => resolve(raw));
+    let tooBig = false;
+    req.on('data', (c) => {
+      if (tooBig) return;
+      raw += c;
+      if (raw.length > MAX_BODY) { tooBig = true; raw = ''; }
+    });
+    req.on('end', () => {
+      if (tooBig) {
+        const err = new Error('請求體過大');
+        err.statusCode = 413;
+        return reject(err);
+      }
+      resolve(raw);
+    });
     req.on('error', reject);
   });
+}
+
+// 常數時間比對：token 長度不同 → 直接視為不符
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
+// 訂單授權：token 上線前的舊訂單（無 token）維持以 orderId 為憑證，
+// 新訂單一律要求高熵 token（錯 token 視為不存在，防列舉）
+function orderAuthorized(order, token) {
+  if (!order) return false;
+  if (!order.token) return true;
+  return safeEqual(order.token, token);
 }
 
 function sendJson(res, code, obj) {
@@ -197,7 +266,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/delivery' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
+      if (!orderAuthorized(order, body.token)) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
       if (order.status !== 'paid') return sendJson(res, 400, { ok: false, error: '訂單尚未付款' });
       const answersRaw = body.answers || {};
       const answers = {};
@@ -217,7 +286,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/upload-photo' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
+      if (!orderAuthorized(order, body.token)) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
       if (order.status !== 'paid') return sendJson(res, 400, { ok: false, error: '訂單尚未付款' });
       const data = body.photo; // data URL 或 base64
       if (typeof data !== 'string' || data.length < 100) return sendJson(res, 400, { ok: false, error: '照片資料無效' });
@@ -233,11 +302,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/report' && req.method === 'GET') {
-      const order = orders[new URLSearchParams(u.search).get('order') || ''];
-      if (!order) return sendJson(res, 404, { error: '訂單不存在' });
+      const qs = new URLSearchParams(u.search);
+      const order = orders[qs.get('order') || ''];
+      if (!orderAuthorized(order, qs.get('token') || '')) return sendJson(res, 404, { error: '訂單不存在' });
       return sendJson(res, 200, {
         orderId: order.id,
         status: order.status,
+        board: order.board || null,
         answers: order.answers || null,
         photo: order.photo || null,
         // ⚠️ 待接：AI 報告生成（目前為人工交付；此處僅回傳已收集的資料）
@@ -247,10 +318,10 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/order' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}');
-      const order = createOrder(body.result);
+      const order = createOrder(body.result, sanitizeBoard(body.board));
 
       if (DEMO) {
-        return sendJson(res, 200, { demo: true, orderId: order.id });
+        return sendJson(res, 200, { demo: true, orderId: order.id, token: order.token });
       }
 
       const params = ecpay.buildOrderParams({
@@ -260,12 +331,12 @@ const server = http.createServer(async (req, res) => {
         tradeDesc: TRADE_DESC,
         itemName: ITEM_NAME,
         returnUrl: `${BASE_URL}/api/pay-callback`,
-        clientBackUrl: `${BASE_URL}/quiz/success.html?order=${order.id}`,
+        clientBackUrl: `${BASE_URL}/quiz/success.html?order=${order.id}&token=${order.token}`,
         alg: ECPAY.alg,
         choosePayment: ECPAY.choosePayment
       });
       params.CheckMacValue = ecpay.checkMacValue(params, ECPAY.hashKey, ECPAY.hashIV, ECPAY.alg);
-      return sendJson(res, 200, { demo: false, orderId: order.id, formAction: ECPAY.action, formFields: params });
+      return sendJson(res, 200, { demo: false, orderId: order.id, token: order.token, formAction: ECPAY.action, formFields: params });
     }
 
     if (p === '/api/pay-callback' && req.method === 'POST') {
@@ -307,7 +378,7 @@ const server = http.createServer(async (req, res) => {
           order.tradeNo = params.TradeNo || '';
           saveOrders();
           fireWebhook('order.paid', {
-            orderId: order.id, amount: order.amount, result: order.result,
+            orderId: order.id, amount: order.amount, result: order.result, board: order.board || null,
             tradeNo: order.tradeNo, method: vAccount ? 'ATM' : 'Credit'
           });
           sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：' + (vAccount ? 'ATM' : 'Credit') + '\n→ 準備交付（問卷＋照片＋48h 報告）');
@@ -318,22 +389,24 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/demo-pay' && req.method === 'POST') {
+      if (!DEMO) return sendJson(res, 403, { ok: false, error: '未開放模擬付款' });
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
+      if (!orderAuthorized(order, body.token)) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
       order.status = 'paid';
       order.paidAt = new Date().toISOString();
       order.tradeNo = 'DEMO-' + order.id;
       saveOrders();
-      fireWebhook('order.paid', { orderId: order.id, amount: order.amount, result: order.result, tradeNo: order.tradeNo, method: 'DEMO' });
-      sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：DEMO\n→ 準備交付（問卷＋照片＋48h 報告）');
+      fireWebhook('order.paid', { orderId: order.id, amount: order.amount, result: order.result, board: order.board || null, tradeNo: order.tradeNo, method: 'DEMO' });
+      if (LINE_NOTIFY_ON_DEMO) sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：DEMO\n→ 準備交付（問卷＋照片＋48h 報告）');
       return sendJson(res, 200, { ok: true, orderId: order.id });
     }
 
     const orderMatch = p.match(/^\/api\/order\/([A-Za-z0-9]+)$/);
     if (orderMatch && req.method === 'GET') {
       const order = orders[orderMatch[1]];
-      if (!order) return sendJson(res, 404, { error: '訂單不存在' });
+      const token = new URLSearchParams(u.search).get('token') || '';
+      if (!orderAuthorized(order, token)) return sendJson(res, 404, { error: '訂單不存在' });
       return sendJson(res, 200, { id: order.id, status: order.status, amount: order.amount, result: order.result });
     }
 
@@ -342,6 +415,10 @@ const server = http.createServer(async (req, res) => {
 
     res.writeHead(405); res.end('Method Not Allowed');
   } catch (err) {
+    if (err && err.statusCode) {
+      res.writeHead(err.statusCode, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end(err.message || 'Bad Request');
+    }
     sendJson(res, 500, { error: '伺服器錯誤' });
   }
 });

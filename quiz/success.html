@@ -27,6 +27,8 @@
       <p class="order-id">訂單編號：<span id="order-id"></span></p>
     </div>
 
+    <div id="board-recap" class="result-note" style="display:none"></div>
+
     <h2 class="serif" style="margin:24px 0 6px">情境問卷</h2>
     <p class="lead" style="font-size:14px;margin-bottom:20px">7 題，2 分鐘。選最接近的就好。</p>
     <div id="q-list"></div>
@@ -41,7 +43,7 @@
     <p id="delivery-msg" class="fineprint"></p>
   </div>
 
-  <p class="fineprint">測驗與報告僅供參考，不構成任何保證。</p>
+  <p class="fineprint">測驗與報告僅供個人參考，請依自己的實際情況判斷。</p>
 
 </div>
 
@@ -50,6 +52,7 @@
   'use strict';
   var params = new URLSearchParams(location.search);
   var orderId = params.get('order') || '';
+  var token = params.get('token') || '';
 
   var status = document.getElementById('status');
   var title = document.getElementById('status-title');
@@ -70,14 +73,15 @@
 
   // 確認訂單已付款
   function check() {
-    if (!orderId) { title.textContent = '訂單編號遺失'; return; }
-    fetch('/api/order/' + encodeURIComponent(orderId))
+    if (!orderId || !token) { title.textContent = '訂單連結失效'; desc.textContent = '請回到付款流程重新取得連結。'; return; }
+    fetch('/api/order/' + encodeURIComponent(orderId) + '?token=' + encodeURIComponent(token))
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.status === 'paid') {
           status.style.display = 'none';
           delivery.style.display = 'block';
           document.getElementById('order-id').textContent = orderId;
+          showBoardRecap();
           loadQuestionnaire();
           return;
         }
@@ -86,6 +90,22 @@
         setTimeout(check, 3000);
       })
       .catch(function () { setTimeout(check, 5000); });
+  }
+
+  // 董事會玩家：付款後把遊戲數據帶進報告，問卷只補第一印象面向
+  function showBoardRecap() {
+    var box = document.getElementById('board-recap');
+    if (!box) return;
+    var br = null;
+    try { br = JSON.parse(localStorage.getItem('zw_result')); } catch (_) {}
+    if (!br || !br.top || !br.top.length) return;
+    var roles = br.top.map(function (s) { return s.role; });
+    var BAR_LABEL = { B1: '攻守', B2: '內外', B3: '剛柔', B4: '快慢' };
+    var barText = Object.keys(BAR_LABEL).map(function (k) {
+      return BAR_LABEL[k] + (br.bars && br.bars[k] != null ? ' ' + br.bars[k] : '');
+    }).join(' · ');
+    box.innerHTML = '你的董事會數據已帶入報告：<strong>' + roles.join('、') + '</strong> 主導（' + barText + '）。下方問卷只補足遊戲沒問到的「第一印象」面向，2 分鐘就好。';
+    box.style.display = 'block';
   }
 
   // 載入 7 題問卷
@@ -156,7 +176,7 @@
     fetch('/api/delivery', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderId: orderId, answers: answers })
+      body: JSON.stringify({ orderId: orderId, token: token, answers: answers })
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -164,7 +184,7 @@
         return fetch('/api/upload-photo', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId: orderId, photo: photoData })
+          body: JSON.stringify({ orderId: orderId, token: token, photo: photoData })
         }).then(function (r) { return r.json(); });
       })
       .then(function (data) {
