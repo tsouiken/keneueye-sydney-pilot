@@ -51,6 +51,7 @@
   var dim = params.get('r') || '';
   var fromBoard = params.get('from') === 'board';
   var orderId = null;
+  var token = null;
 
   var recap = document.getElementById('recap');
   var boardResult = null;
@@ -82,6 +83,7 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         orderId = data.orderId;
+        token = data.token || '';
         if (data.demo) {
           demoBox.style.display = 'block';
           btnPay.style.display = 'none';
@@ -111,12 +113,12 @@
     fetch('/api/demo-pay', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderId: orderId })
+      body: JSON.stringify({ orderId: orderId, token: token })
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.ok) {
-          location.href = 'success.html?order=' + orderId;
+          location.href = 'success.html?order=' + encodeURIComponent(orderId) + '&token=' + encodeURIComponent(token);
         } else {
           alert('模擬付款失敗：' + (data.error || '未知錯誤'));
           btnDemo.disabled = false;

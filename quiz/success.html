@@ -52,6 +52,7 @@
   'use strict';
   var params = new URLSearchParams(location.search);
   var orderId = params.get('order') || '';
+  var token = params.get('token') || '';
 
   var status = document.getElementById('status');
   var title = document.getElementById('status-title');
@@ -72,8 +73,8 @@
 
   // 確認訂單已付款
   function check() {
-    if (!orderId) { title.textContent = '訂單編號遺失'; return; }
-    fetch('/api/order/' + encodeURIComponent(orderId))
+    if (!orderId || !token) { title.textContent = '訂單連結失效'; desc.textContent = '請回到付款流程重新取得連結。'; return; }
+    fetch('/api/order/' + encodeURIComponent(orderId) + '?token=' + encodeURIComponent(token))
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.status === 'paid') {
@@ -175,7 +176,7 @@
     fetch('/api/delivery', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderId: orderId, answers: answers })
+      body: JSON.stringify({ orderId: orderId, token: token, answers: answers })
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -183,7 +184,7 @@
         return fetch('/api/upload-photo', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId: orderId, photo: photoData })
+          body: JSON.stringify({ orderId: orderId, token: token, photo: photoData })
         }).then(function (r) { return r.json(); });
       })
       .then(function (data) {

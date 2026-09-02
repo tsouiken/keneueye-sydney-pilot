@@ -49,14 +49,23 @@ test('server 啟動（交付端點整合流程）', async (t) => {
   assert.strictEqual(order.status, 200);
   assert.strictEqual(order.json.demo, true);
   const orderId = order.json.orderId;
+  const token = order.json.token;
 
-  // 2. 尚未付款，送出問卷應拒絕
-  const pre = await req('POST', '/api/delivery', { orderId, answers: {} });
+  // 2. 尚未付款，送出問卷應拒絕（帶正確 token）
+  const pre = await req('POST', '/api/delivery', { orderId, token, answers: {} });
   assert.strictEqual(pre.status, 400);
 
+  // 2a. 錯 token 的問卷視為不存在（防列舉）
+  const evil = await req('POST', '/api/delivery', { orderId, token: 'nope', answers: {} });
+  assert.strictEqual(evil.status, 404);
+
   // 3. 模擬付款
-  const pay = await req('POST', '/api/demo-pay', { orderId });
+  const pay = await req('POST', '/api/demo-pay', { orderId, token });
   assert.strictEqual(pay.json.ok, true);
+
+  // 3a. DEMO 模式下錯 token 無法偷付款
+  const evilPay = await req('POST', '/api/demo-pay', { orderId, token: 'nope' });
+  assert.strictEqual(evilPay.status, 404);
 
   // 4. 取得問卷定義
   const q = await req('GET', '/api/questionnaire');
@@ -66,24 +75,26 @@ test('server 啟動（交付端點整合流程）', async (t) => {
   // 5. 送出完整問卷
   const answers = {};
   q.json.questions.forEach((x, i) => { answers[x.id] = x.options[0]; });
-  const deliv = await req('POST', '/api/delivery', { orderId, answers });
+  const deliv = await req('POST', '/api/delivery', { orderId, token, answers });
   assert.strictEqual(deliv.status, 200);
   assert.strictEqual(deliv.json.ok, true);
 
   // 6. 送出缺題問卷應失敗
   const incomplete = { q1: 'x' };
-  const bad = await req('POST', '/api/delivery', { orderId, answers: incomplete });
+  const bad = await req('POST', '/api/delivery', { orderId, token, answers: incomplete });
   assert.strictEqual(bad.status, 400);
 
   // 7. 上傳照片（1x1 紅點 PNG data URL）
   const tinyPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-  const up = await req('POST', '/api/upload-photo', { orderId, photo: tinyPng });
+  const up = await req('POST', '/api/upload-photo', { orderId, token, photo: tinyPng });
   assert.strictEqual(up.status, 200);
   assert.strictEqual(up.json.ok, true);
   assert.ok(up.json.photo.startsWith('/uploads/'));
 
-  // 8. 查詢報告資料齊全
-  const rep = await req('GET', `/api/report?order=${orderId}`);
+  // 8. 查詢報告資料齊全（需帶 token）
+  const repNoTok = await req('GET', `/api/report?order=${orderId}`);
+  assert.strictEqual(repNoTok.status, 404, '無 token 不得讀取報告資料');
+  const rep = await req('GET', `/api/report?order=${orderId}&token=${token}`);
   assert.strictEqual(rep.status, 200);
   assert.strictEqual(rep.json.status, 'paid');
   assert.ok(rep.json.answers);

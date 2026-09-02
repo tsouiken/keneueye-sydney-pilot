@@ -13,11 +13,14 @@
  *   GET  /api/health          → 健康檢查
  *
  * 安全：所有憑證只從環境變數讀取；回傳驗證金額；不輸出任何 Secret。
+ *       客戶端敏感端點一律需帶高熵 token（建立訂單時產生，等同訂單存取憑證）。
+ *       靜態檔只服務白名單公開檔案，禁止讀取 orders.json / .env / 程式碼等。
  */
 'use strict';
 
 const http = require('http');
 const https = require('https');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
@@ -113,8 +116,10 @@ function createOrder(result) {
   const ts = new Date().toISOString().replace(/\D/g, '').slice(0, 14); // 14 位
   const rand = String(Math.floor(Math.random() * 900) + 100);           // 3 位
   const id = 'KC' + ts + rand;                                          // 19 字元 ≤ 20
+  const token = crypto.randomBytes(24).toString('hex');                 // 高熵訂單存取憑證
   orders[id] = {
     id,
+    token,
     result: result || '',
     amount: PRICE,
     status: 'pending',
@@ -138,6 +143,17 @@ const MIME = {
   '.ico': 'image/x-icon'
 };
 
+// 白名單：只服務明確公開的根目錄頁面與 quiz/ 資源，其餘一律 404
+// （避免 /orders.json、/.env、/server.js、/package.json、test/、docs/ 等被直接讀取）
+function isPublicStatic(rel, pathname) {
+  if (pathname === '/' || pathname === '') return true;
+  if (pathname === '/quiz' || pathname === '/quiz/') return true;
+  const ROOT_PAGES = new Set(['index.html', 'firstimpression.html', 'enroll.html', 'report.html']);
+  if (ROOT_PAGES.has(rel)) return true;
+  if (/^quiz\/[A-Za-z0-9._-]+$/.test(rel) && /\.(html|css|js|png|jpg|jpeg|svg|ico)$/.test(rel)) return true;
+  return false;
+}
+
 function serveStatic(req, res, pathname) {
   let rel;
   let base = ROOT;
@@ -151,6 +167,9 @@ function serveStatic(req, res, pathname) {
     rel = path.join('quiz', 'index.html');
   } else {
     rel = pathname.replace(/^\/+/, '');
+    if (!isPublicStatic(rel, pathname)) {
+      res.writeHead(404); res.end('Not Found'); return;
+    }
   }
 
   const file = path.resolve(base, rel);
@@ -165,13 +184,34 @@ function serveStatic(req, res, pathname) {
 }
 
 // ---------- 工具 ----------
+// 交付頁收 data URL 照片，上限標示 5MiB；base64＋JSON 包裝後約 ×1.38，
+// 故本體上限取 8MiB（超限回 413，不砍連線讓客戶掛著）
+const MAX_BODY = 8 * 1024 * 1024;
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let raw = '';
-    req.on('data', (c) => { raw += c; if (raw.length > 1e6) req.destroy(); });
-    req.on('end', () => resolve(raw));
+    let tooBig = false;
+    req.on('data', (c) => {
+      if (tooBig) return;
+      raw += c;
+      if (raw.length > MAX_BODY) { tooBig = true; raw = ''; }
+    });
+    req.on('end', () => {
+      if (tooBig) {
+        const err = new Error('請求體過大');
+        err.statusCode = 413;
+        return reject(err);
+      }
+      resolve(raw);
+    });
     req.on('error', reject);
   });
+}
+
+// 常數時間比對：token 長度不同 → 直接視為不符
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
 function sendJson(res, code, obj) {
@@ -198,7 +238,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/delivery' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
+      if (!order || !safeEqual(order.token, body.token)) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
       if (order.status !== 'paid') return sendJson(res, 400, { ok: false, error: '訂單尚未付款' });
       const answersRaw = body.answers || {};
       const answers = {};
@@ -218,7 +258,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/upload-photo' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
+      if (!order || !safeEqual(order.token, body.token)) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
       if (order.status !== 'paid') return sendJson(res, 400, { ok: false, error: '訂單尚未付款' });
       const data = body.photo; // data URL 或 base64
       if (typeof data !== 'string' || data.length < 100) return sendJson(res, 400, { ok: false, error: '照片資料無效' });
@@ -234,8 +274,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/report' && req.method === 'GET') {
-      const order = orders[new URLSearchParams(u.search).get('order') || ''];
-      if (!order) return sendJson(res, 404, { error: '訂單不存在' });
+      const qs = new URLSearchParams(u.search);
+      const order = orders[qs.get('order') || ''];
+      if (!order || !safeEqual(order.token, qs.get('token') || '')) return sendJson(res, 404, { error: '訂單不存在' });
       return sendJson(res, 200, {
         orderId: order.id,
         status: order.status,
@@ -251,7 +292,7 @@ const server = http.createServer(async (req, res) => {
       const order = createOrder(body.result);
 
       if (DEMO) {
-        return sendJson(res, 200, { demo: true, orderId: order.id });
+        return sendJson(res, 200, { demo: true, orderId: order.id, token: order.token });
       }
 
       const params = ecpay.buildOrderParams({
@@ -261,12 +302,12 @@ const server = http.createServer(async (req, res) => {
         tradeDesc: TRADE_DESC,
         itemName: ITEM_NAME,
         returnUrl: `${BASE_URL}/api/pay-callback`,
-        clientBackUrl: `${BASE_URL}/quiz/success.html?order=${order.id}`,
+        clientBackUrl: `${BASE_URL}/quiz/success.html?order=${order.id}&token=${order.token}`,
         alg: ECPAY.alg,
         choosePayment: ECPAY.choosePayment
       });
       params.CheckMacValue = ecpay.checkMacValue(params, ECPAY.hashKey, ECPAY.hashIV, ECPAY.alg);
-      return sendJson(res, 200, { demo: false, orderId: order.id, formAction: ECPAY.action, formFields: params });
+      return sendJson(res, 200, { demo: false, orderId: order.id, token: order.token, formAction: ECPAY.action, formFields: params });
     }
 
     if (p === '/api/pay-callback' && req.method === 'POST') {
@@ -319,9 +360,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/demo-pay' && req.method === 'POST') {
+      if (!DEMO) return sendJson(res, 403, { ok: false, error: '未開放模擬付款' });
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
+      if (!order || !safeEqual(order.token, body.token)) return sendJson(res, 404, { ok: false, error: '訂單不存在' });
       order.status = 'paid';
       order.paidAt = new Date().toISOString();
       order.tradeNo = 'DEMO-' + order.id;
@@ -334,7 +376,8 @@ const server = http.createServer(async (req, res) => {
     const orderMatch = p.match(/^\/api\/order\/([A-Za-z0-9]+)$/);
     if (orderMatch && req.method === 'GET') {
       const order = orders[orderMatch[1]];
-      if (!order) return sendJson(res, 404, { error: '訂單不存在' });
+      const token = new URLSearchParams(u.search).get('token') || '';
+      if (!order || !safeEqual(order.token, token)) return sendJson(res, 404, { error: '訂單不存在' });
       return sendJson(res, 200, { id: order.id, status: order.status, amount: order.amount, result: order.result });
     }
 
@@ -343,6 +386,10 @@ const server = http.createServer(async (req, res) => {
 
     res.writeHead(405); res.end('Method Not Allowed');
   } catch (err) {
+    if (err && err.statusCode) {
+      res.writeHead(err.statusCode, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end(err.message || 'Bad Request');
+    }
     sendJson(res, 500, { error: '伺服器錯誤' });
   }
 });

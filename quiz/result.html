@@ -68,6 +68,20 @@
 
   function roleName(s) { return (byKey[s.key] || {}).role || ''; }
 
+  // 收藏採跨重玩累積：本次解鎖 ＋ 歷史收藏聯集，並存回 zw_unlocked
+  // （避免每輪只用 top3 覆寫 zw_result，讓已開啟的成員又鎖回去）
+  function loadUnlocked() {
+    var set = {};
+    (data.unlocked || []).forEach(function (k) { set[k] = true; });
+    var hist = [];
+    try { hist = JSON.parse(localStorage.getItem('zw_unlocked') || '[]'); } catch (_) {}
+    (Array.isArray(hist) ? hist : []).forEach(function (k) { set[k] = true; });
+    var keys = Object.keys(set);
+    try { localStorage.setItem('zw_unlocked', JSON.stringify(keys)); } catch (_) {}
+    return keys;
+  }
+  var unlockedArr = loadUnlocked();
+
   // 主標：第一名角色名（對外只用角色，不用星名）
   var t0 = data.top[0];
   document.getElementById('result-headline').textContent =
@@ -103,7 +117,7 @@
   var coll = document.getElementById('collection');
   var unlockedCount = 0;
   QuizLogic.STARS.forEach(function (s) {
-    var on = data.unlocked.indexOf(s.key) !== -1;
+    var on = unlockedArr.indexOf(s.key) !== -1;
     if (on) unlockedCount++;
     var el = document.createElement('div');
     el.className = 'coll-item' + (on ? ' on' : ' locked');
