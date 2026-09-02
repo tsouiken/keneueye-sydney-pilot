@@ -57,9 +57,14 @@
   var boardResult = null;
   try { boardResult = JSON.parse(localStorage.getItem('zw_result')); } catch (_) {}
   var boardLabel = null;
+  var boardPayload = null;
   if (fromBoard && boardResult && boardResult.top && boardResult.top.length) {
     var roleNames = boardResult.top.map(function (s) { return s.role; });
     boardLabel = '董事會：' + roleNames.join('、');
+    boardPayload = {
+      top: boardResult.top.map(function (s) { return { key: s.key, role: s.role }; }),
+      bars: boardResult.bars || null
+    };
     recap.innerHTML = '你的董事會核心：<strong>' + roleNames.join('、') + '</strong>。解鎖後會針對你的眉眼結構做完整校準分析。';
   } else if (dim && window.QuizLogic && QuizLogic.RESULTS && QuizLogic.RESULTS[dim]) {
     recap.innerHTML = '你的測驗結果：<strong>' + QuizLogic.RESULTS[dim].title + '</strong> 被低估';
@@ -78,7 +83,7 @@
     fetch('/api/order', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ result: boardLabel || (fromBoard ? '董事會' : dim) })
+      body: JSON.stringify({ result: boardLabel || (fromBoard ? '董事會' : dim), board: boardPayload })
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {

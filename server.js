@@ -308,6 +308,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         orderId: order.id,
         status: order.status,
+        board: order.board || null,
         answers: order.answers || null,
         photo: order.photo || null,
         // ⚠️ 待接：AI 報告生成（目前為人工交付；此處僅回傳已收集的資料）
@@ -317,7 +318,7 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/order' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}');
-      const order = createOrder(body.result);
+      const order = createOrder(body.result, sanitizeBoard(body.board));
 
       if (DEMO) {
         return sendJson(res, 200, { demo: true, orderId: order.id, token: order.token });
@@ -377,7 +378,7 @@ const server = http.createServer(async (req, res) => {
           order.tradeNo = params.TradeNo || '';
           saveOrders();
           fireWebhook('order.paid', {
-            orderId: order.id, amount: order.amount, result: order.result,
+            orderId: order.id, amount: order.amount, result: order.result, board: order.board || null,
             tradeNo: order.tradeNo, method: vAccount ? 'ATM' : 'Credit'
           });
           sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：' + (vAccount ? 'ATM' : 'Credit') + '\n→ 準備交付（問卷＋照片＋48h 報告）');
@@ -396,7 +397,7 @@ const server = http.createServer(async (req, res) => {
       order.paidAt = new Date().toISOString();
       order.tradeNo = 'DEMO-' + order.id;
       saveOrders();
-      fireWebhook('order.paid', { orderId: order.id, amount: order.amount, result: order.result, tradeNo: order.tradeNo, method: 'DEMO' });
+      fireWebhook('order.paid', { orderId: order.id, amount: order.amount, result: order.result, board: order.board || null, tradeNo: order.tradeNo, method: 'DEMO' });
       if (LINE_NOTIFY_ON_DEMO) sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：DEMO\n→ 準備交付（問卷＋照片＋48h 報告）');
       return sendJson(res, 200, { ok: true, orderId: order.id });
     }
