@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>案例授權登記 — KenEyeCue 內部</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans TC', sans-serif;
+      background: #f0f0f0; color: #1a1a1a; min-height: 100vh;
+    }
+    header {
+      background: #1a1a1a; color: #fff; padding: 16px 24px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    header h1 { font-size: 1rem; font-weight: 600; }
+    header span { font-size: .8rem; color: #888; }
+
+    .container { max-width: 760px; margin: 0 auto; padding: 28px 20px 80px; }
+
+    .card {
+      background: #fff; border-radius: 12px; border: 1px solid #e0e0e0;
+      padding: 28px 32px; margin-bottom: 20px;
+    }
+    .card h2 { font-size: 1rem; font-weight: 700; margin-bottom: 16px; color: #1a1a1a; }
+
+    label { display: block; font-size: .8rem; font-weight: 600; color: #555; margin-bottom: 5px; }
+    input[type=text], input[type=date], select, textarea {
+      width: 100%; padding: 10px 14px; border: 1px solid #d0d0d0; border-radius: 8px;
+      font-size: .875rem; background: #fafafa; color: #1a1a1a;
+      font-family: inherit; transition: border-color .15s;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none; border-color: #1a1a1a; background: #fff;
+    }
+    textarea { resize: vertical; min-height: 80px; }
+    .field { margin-bottom: 18px; }
+
+    .scope-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;
+    }
+    .scope-item {
+      border: 2px solid #e0e0e0; border-radius: 8px; padding: 12px 14px; cursor: pointer;
+      transition: all .15s; display: flex; align-items: flex-start; gap: 10px;
+    }
+    .scope-item.selected { border-color: #1a1a1a; background: #f5f5f5; }
+    .scope-item input { flex-shrink: 0; margin-top: 2px; cursor: pointer; }
+    .scope-item-text { font-size: .8rem; line-height: 1.4; }
+    .scope-item-text strong { display: block; margin-bottom: 2px; font-size: .85rem; }
+
+    .btn-row { display: flex; gap: 10px; }
+    .btn-primary {
+      padding: 12px 28px; background: #1a1a1a; color: #fff; border: none;
+      border-radius: 8px; font-size: .9rem; font-weight: 700; cursor: pointer;
+    }
+    .btn-primary:hover { background: #333; }
+    .btn-secondary {
+      padding: 12px 22px; background: #fff; color: #333; border: 1px solid #ccc;
+      border-radius: 8px; font-size: .875rem; cursor: pointer;
+    }
+
+    /* Generated consent text */
+    #output-section { display: none; }
+    .output-box {
+      background: #f8f8f8; border: 1px solid #ddd; border-radius: 8px;
+      padding: 20px 24px; font-size: .875rem; line-height: 1.8; color: #333;
+      white-space: pre-wrap; font-family: inherit;
+    }
+    .copy-btn {
+      margin-top: 12px; padding: 8px 20px; background: #1a1a1a; color: #fff;
+      border: none; border-radius: 6px; font-size: .8rem; cursor: pointer;
+    }
+    .copy-btn:hover { background: #333; }
+    .copy-notif { display: inline; margin-left: 10px; font-size: .8rem; color: #388e3c; }
+
+    /* Log table */
+    .log-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+    .log-table th, .log-table td {
+      text-align: left; padding: 10px 12px; border-bottom: 1px solid #f0f0f0;
+    }
+    .log-table th { font-weight: 700; color: #888; background: #fafafa; }
+    .log-table tr:hover td { background: #f9f9f9; }
+    .badge-scope {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      font-size: .7rem; font-weight: 700; margin: 1px;
+    }
+    .bs-demo   { background: #e3f2fd; color: #1565c0; }
+    .bs-anon   { background: #e8f5e9; color: #2e7d32; }
+    .bs-intern { background: #fff8e1; color: #e65100; }
+    .bs-none   { background: #fee; color: #c00; }
+    .status-active   { color: #2e7d32; font-weight: 700; }
+    .status-revoked  { color: #c62828; font-weight: 700; }
+
+    .empty-state {
+      text-align: center; padding: 32px; color: #aaa; font-size: .875rem;
+    }
+
+    .notice {
+      background: #fff8e1; border: 1px solid #ffe082; border-radius: 8px;
+      padding: 12px 16px; font-size: .8rem; color: #5d4037; margin-top: 16px; line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>案例授權登記 — 內部工具</h1>
+  <span>Bonnie / Ken 使用</span>
+</header>
+
+<div class="container">
+
+  <!-- Form -->
+  <div class="card">
+    <h2>新增授權記錄</h2>
+
+    <div class="field">
+      <label>客戶代稱 <span style="color:#c00">*</span></label>
+      <input type="text" id="f-alias" placeholder="例：A阿嬤、C同學（不要填真實姓名）" required>
+    </div>
+
+    <div class="field">
+      <label>授權日期 <span style="color:#c00">*</span></label>
+      <input type="date" id="f-date" required>
+    </div>
+
+    <div class="field">
+      <label>授權範圍 <span style="color:#c00">*</span>（可複選）</label>
+      <div class="scope-grid" id="scope-grid">
+        <label class="scope-item" id="si-demo">
+          <input type="checkbox" value="demo" onchange="updateScope('demo')">
+          <div class="scope-item-text">
+            <strong>課程示範</strong>
+            用於課程教學示範，學員可見，標記去識別化代稱。
+          </div>
+        </label>
+        <label class="scope-item" id="si-anon">
+          <input type="checkbox" value="anon" onchange="updateScope('anon')">
+          <div class="scope-item-text">
+            <strong>去識別化公開</strong>
+            移除所有識別資訊後，可用於公開內容（貼文、案例分享）。
+          </div>
+        </label>
+        <label class="scope-item" id="si-intern">
+          <input type="checkbox" value="intern" onchange="updateScope('intern')">
+          <div class="scope-item-text">
+            <strong>僅限內部</strong>
+            僅用於 Bonnie / Ken 內部參考，不對外公開。
+          </div>
+        </label>
+        <label class="scope-item" id="si-none">
+          <input type="checkbox" value="none" onchange="updateScope('none')">
+          <div class="scope-item-text">
+            <strong>不授權</strong>
+            客戶明確表示不同意任何形式的案例使用。
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>授權方式</label>
+      <select id="f-method">
+        <option value="">— 選擇 —</option>
+        <option value="oral">口頭同意（已告知可撤回）</option>
+        <option value="written">書面同意（紙本或訊息截圖）</option>
+        <option value="digital">數位確認（LINE / WhatsApp 回覆截圖）</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>服務類型</label>
+      <select id="f-service">
+        <option value="">— 選擇 —</option>
+        <option value="full">Full Package（完整眉眼分析）</option>
+        <option value="L1">L1 眉型</option>
+        <option value="L2">L2 眼型</option>
+        <option value="brow">修眉服務</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>備註（可選）</label>
+      <textarea id="f-notes" placeholder="例：客戶要求不使用臉部照片，僅可描述眉型特徵"></textarea>
+    </div>
+
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="f-revoke-info" checked>
+        <span>已告知客戶可隨時撤回授權</span>
+      </label>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-primary" onclick="generateConsent()">產生授權確認文字</button>
+      <button class="btn-secondary" onclick="resetForm()">清除</button>
+    </div>
+  </div>
+
+  <!-- Output -->
+  <div class="card" id="output-section">
+    <h2>授權確認文字（可複製給客戶確認）</h2>
+    <div class="output-box" id="output-text"></div>
+    <div>
+      <button class="copy-btn" onclick="copyOutput()">複製文字</button>
+      <span class="copy-notif" id="copy-notif" style="display:none">✓ 已複製</span>
+      <button class="btn-secondary" style="margin-left:8px;" onclick="saveRecord()">儲存此記錄</button>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="card">
+    <h2>授權記錄（本機暫存）</h2>
+    <div class="notice">⚠️ 記錄目前儲存於本瀏覽器。正式版本應匯入 Notion 客戶資料庫，並附上授權方式的截圖憑證。</div>
+    <div style="margin-top:16px;">
+      <table class="log-table" id="log-table">
+        <thead>
+          <tr>
+            <th>代稱</th>
+            <th>日期</th>
+            <th>服務</th>
+            <th>授權範圍</th>
+            <th>方式</th>
+            <th>狀態</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="log-body">
+          <tr><td colspan="7" class="empty-state">尚無記錄</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const SCOPE_LABELS = {
+    demo:   { label: '課程示範', cls: 'bs-demo' },
+    anon:   { label: '去識別化公開', cls: 'bs-anon' },
+    intern: { label: '僅限內部', cls: 'bs-intern' },
+    none:   { label: '不授權', cls: 'bs-none' }
+  };
+  const METHOD_LABELS = { oral: '口頭', written: '書面', digital: '數位確認' };
+  const SERVICE_LABELS = {
+    full: 'Full Package', L1: 'L1 眉型', L2: 'L2 眼型', brow: '修眉服務'
+  };
+
+  const selectedScopes = new Set();
+  let pendingRecord = null;
+
+  function updateScope(val) {
+    const si = document.getElementById('si-' + val);
+    const cb = si.querySelector('input');
+    if (val === 'none') {
+      if (cb.checked) {
+        selectedScopes.clear();
+        selectedScopes.add('none');
+        ['demo','anon','intern'].forEach(s => {
+          const el = document.getElementById('si-' + s);
+          el.querySelector('input').checked = false;
+          el.classList.remove('selected');
+        });
+      } else {
+        selectedScopes.delete('none');
+      }
+    } else {
+      const noneEl = document.getElementById('si-none');
+      noneEl.querySelector('input').checked = false;
+      noneEl.classList.remove('selected');
+      selectedScopes.delete('none');
+      if (cb.checked) selectedScopes.add(val);
+      else selectedScopes.delete(val);
+    }
+    si.classList.toggle('selected', cb.checked);
+  }
+
+  function generateConsent() {
+    const alias   = document.getElementById('f-alias').value.trim();
+    const date    = document.getElementById('f-date').value;
+    const method  = document.getElementById('f-method').value;
+    const service = document.getElementById('f-service').value;
+    const notes   = document.getElementById('f-notes').value.trim();
+    const revokeInfo = document.getElementById('f-revoke-info').checked;
+
+    if (!alias) { alert('請填寫客戶代稱'); return; }
+    if (!date)  { alert('請選擇授權日期'); return; }
+    if (selectedScopes.size === 0) { alert('請選擇至少一項授權範圍'); return; }
+
+    const scopeText = [...selectedScopes].map(s => SCOPE_LABELS[s]?.label || s).join('、');
+    const serviceText = SERVICE_LABELS[service] || '（未指定）';
+    const methodText  = METHOD_LABELS[method]   || '（未指定）';
+
+    const text = `【KenEyeCue 案例授權確認】
+
+客戶代稱：${alias}
+服務項目：${serviceText}
+授權日期：${date}
+授權範圍：${scopeText}
+授權方式：${methodText}
+
+授權說明：
+本人（以代稱 ${alias} 表示）同意 KenEyeCue（Bonnie Tsui / Ken 眼眉觀察）將本次服務的相關資料，依上述授權範圍用於教學、研究或內容製作。
+
+使用限制：
+• 不得公開真實姓名、聯絡方式或其他可識別個人身分的資訊。
+• 僅在授權範圍內使用，不得超範圍轉用。
+• 本授權可隨時撤回，撤回後不再繼續使用，但已完成的材料無法追溯修改。${notes ? `\n\n特別備註：\n${notes}` : ''}${revokeInfo ? '\n\n已告知可撤回：是' : ''}
+
+—— 以上確認文字由 KenEyeCue 授權登記系統產生（${new Date().toLocaleString('zh-TW')}）——`;
+
+    document.getElementById('output-text').textContent = text;
+    document.getElementById('output-section').style.display = 'block';
+    document.getElementById('output-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    pendingRecord = { alias, date, service, scopes: [...selectedScopes], method, notes, status: 'active', ts: Date.now() };
+  }
+
+  function copyOutput() {
+    const text = document.getElementById('output-text').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      const notif = document.getElementById('copy-notif');
+      notif.style.display = 'inline';
+      setTimeout(() => { notif.style.display = 'none'; }, 2000);
+    });
+  }
+
+  function saveRecord() {
+    if (!pendingRecord) return;
+    const records = loadRecords();
+    records.unshift(pendingRecord);
+    try { localStorage.setItem('kec_consent_log', JSON.stringify(records)); } catch (e) {}
+    renderLog();
+    document.getElementById('output-section').style.display = 'none';
+    pendingRecord = null;
+    resetForm();
+  }
+
+  function loadRecords() {
+    try {
+      const raw = localStorage.getItem('kec_consent_log');
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return [];
+  }
+
+  function revokeRecord(idx) {
+    if (!confirm('確認撤回此授權？')) return;
+    const records = loadRecords();
+    if (records[idx]) { records[idx].status = 'revoked'; records[idx].revoked_at = Date.now(); }
+    try { localStorage.setItem('kec_consent_log', JSON.stringify(records)); } catch (e) {}
+    renderLog();
+  }
+
+  function renderLog() {
+    const records = loadRecords();
+    const tbody = document.getElementById('log-body');
+    if (!records.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-state">尚無記錄</td></tr>';
+      return;
+    }
+    tbody.innerHTML = records.map((r, i) => {
+      const scopeBadges = r.scopes.map(s =>
+        `<span class="badge-scope ${SCOPE_LABELS[s]?.cls || ''}">${SCOPE_LABELS[s]?.label || s}</span>`
+      ).join('');
+      const statusClass = r.status === 'active' ? 'status-active' : 'status-revoked';
+      const statusLabel = r.status === 'active' ? '✓ 有效' : '✗ 已撤回';
+      return `<tr>
+        <td><strong>${r.alias}</strong></td>
+        <td>${r.date}</td>
+        <td>${SERVICE_LABELS[r.service] || '—'}</td>
+        <td>${scopeBadges}</td>
+        <td>${METHOD_LABELS[r.method] || '—'}</td>
+        <td class="${statusClass}">${statusLabel}</td>
+        <td>${r.status === 'active'
+          ? `<button onclick="revokeRecord(${i})" style="font-size:.75rem;color:#c00;background:none;border:none;cursor:pointer;">撤回</button>`
+          : ''
+        }</td>
+      </tr>`;
+    }).join('');
+  }
+
+  function resetForm() {
+    document.getElementById('f-alias').value = '';
+    document.getElementById('f-date').value = '';
+    document.getElementById('f-method').value = '';
+    document.getElementById('f-service').value = '';
+    document.getElementById('f-notes').value = '';
+    document.getElementById('f-revoke-info').checked = true;
+    selectedScopes.clear();
+    ['demo','anon','intern','none'].forEach(s => {
+      const el = document.getElementById('si-' + s);
+      el.querySelector('input').checked = false;
+      el.classList.remove('selected');
+    });
+    pendingRecord = null;
+  }
+
+  // Set default date to today
+  document.getElementById('f-date').value = new Date().toISOString().slice(0, 10);
+  renderLog();
+</script>
+</body>
+</html>

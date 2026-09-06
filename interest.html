@@ -32,6 +32,10 @@ hr { border: none; border-top: 1px solid #eee; margin: 24px 0; }
 ⚠️ 这个表单目前还没有串接后端资料库，提交后会请你「复制」一段整理好的资讯，透过 LINE / 微信发给 Bonnie。我们不会假装资料已经自动送到系统里。
 </div>
 
+<div class="disclaimer" style="background:#f0f5ff;border:1px solid #c7d7f5;color:#334;margin-bottom:16px;">
+🔒 <strong>资料使用说明：</strong>你提供的资讯仅用于本次登记联系，不会建立长期档案、不用于广告或模型训练，且可随时要求删除。<a href="privacy-consent.html" style="color:#1a1a1a;">了解你的资料权利 →</a>
+</div>
+
 <form id="interestForm">
 
 <div class="form-group">
@@ -65,10 +69,25 @@ hr { border: none; border-top: 1px solid #eee; margin: 24px 0; }
 <input type="text" name="contact" required placeholder="方便 Bonnie 联系你的方式">
 </div>
 
+<div class="form-group" style="margin-top:4px;">
+<label style="display:flex;align-items:flex-start;gap:8px;font-weight:400;cursor:pointer;">
+  <input type="checkbox" name="age_confirm" required style="width:auto;flex-shrink:0;margin-top:3px;">
+  <span>我已满 18 岁 <span style="color:#c00">*</span>（本服务设计供成年人使用）</span>
+</label>
+</div>
+
+<div class="form-group">
+<label style="display:flex;align-items:flex-start;gap:8px;font-weight:400;cursor:pointer;">
+  <input type="checkbox" name="privacy_agree" required style="width:auto;flex-shrink:0;margin-top:3px;">
+  <span>我了解所提供资讯仅用于本次登记联系，可随时要求删除，并同意<a href="privacy-consent.html" style="color:#1a1a1a;">资料使用说明</a>。<span style="color:#c00">*</span></span>
+</label>
+</div>
+
 <button type="submit" class="btn">提交登记</button>
 
 <p class="note">
-提交后请依指示复制资讯发给 Bonnie，她会在 48 小时内回覆你。
+提交后请依指示复制资讯发给 Bonnie，她会在 48 小时内回覆你。<br>
+<a href="data-rights.html" style="color:#999;">了解如何查看、修改或删除你的资料 →</a>
 </p>
 
 </form>

@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>資料管理與刪除 — KenEyeCue</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans TC', sans-serif;
+      background: #f5f5f5; color: #1a1a1a; min-height: 100vh;
+    }
+    header {
+      background: #1a1a1a; color: #fff; padding: 18px 24px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    header a { color: #ccc; text-decoration: none; font-size: .85rem; }
+    header a:hover { color: #fff; }
+    header h1 { font-size: 1.1rem; font-weight: 600; }
+    .container { max-width: 720px; margin: 0 auto; padding: 32px 24px 80px; }
+
+    .section-title {
+      font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+      color: #888; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid #e8e8e8;
+    }
+    .card {
+      background: #fff; border-radius: 12px; border: 1px solid #e8e8e8;
+      padding: 24px 28px; margin-bottom: 16px;
+    }
+    .card h3 { font-size: .95rem; font-weight: 700; margin-bottom: 6px; }
+    .card p  { font-size: .875rem; color: #555; line-height: 1.6; margin-bottom: 12px; }
+    .card p:last-child { margin-bottom: 0; }
+
+    /* Consent toggles */
+    .consent-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 14px 0; border-bottom: 1px solid #f0f0f0;
+    }
+    .consent-row:last-child { border-bottom: none; }
+    .consent-label { font-size: .875rem; }
+    .consent-label small { display: block; color: #888; font-size: .775rem; margin-top: 2px; }
+    .toggle-btn {
+      padding: 6px 16px; border-radius: 20px; border: 2px solid;
+      font-size: .8rem; font-weight: 700; cursor: pointer; white-space: nowrap;
+      background: transparent; transition: all .15s;
+    }
+    .toggle-btn.active   { border-color: #4caf50; color: #2e7d32; }
+    .toggle-btn.inactive { border-color: #ccc;    color: #888; }
+    .toggle-btn.active:hover   { background: #f1f8e9; }
+    .toggle-btn.inactive:hover { background: #f5f5f5; }
+
+    /* Action buttons */
+    .action-btn {
+      display: block; width: 100%; padding: 11px 18px; border-radius: 8px;
+      border: 1px solid #e0e0e0; background: #fff; color: #333;
+      font-size: .875rem; font-weight: 600; cursor: pointer; text-align: left;
+      margin-bottom: 8px; transition: background .1s;
+    }
+    .action-btn:hover  { background: #f5f5f5; }
+    .action-btn.danger { border-color: #f44336; color: #c62828; }
+    .action-btn.danger:hover { background: #fff3f3; }
+    .action-btn .icon  { margin-right: 8px; }
+
+    /* Confirm panel */
+    .confirm-panel {
+      display: none; margin-top: 12px; background: #fff8e1;
+      border: 1px solid #ffe082; border-radius: 8px; padding: 16px 18px;
+    }
+    .confirm-panel.visible { display: block; }
+    .confirm-panel p { font-size: .875rem; color: #5d4037; margin-bottom: 12px; line-height: 1.5; }
+    .confirm-panel .btn-row { display: flex; gap: 8px; }
+    .confirm-panel .btn-cancel {
+      padding: 8px 18px; border: 1px solid #ccc; border-radius: 6px;
+      background: #fff; cursor: pointer; font-size: .8rem;
+    }
+    .confirm-panel .btn-confirm {
+      padding: 8px 18px; border: none; border-radius: 6px;
+      background: #d32f2f; color: #fff; cursor: pointer; font-size: .8rem; font-weight: 700;
+    }
+
+    /* Success notification */
+    .notif {
+      display: none; background: #e8f5e9; border: 1px solid #a5d6a7;
+      border-radius: 8px; padding: 12px 16px; font-size: .875rem; color: #2e7d32;
+      margin-top: 12px;
+    }
+    .notif.visible { display: block; }
+
+    /* Notice */
+    .notice {
+      background: #fff8e1; border: 1px solid #ffe082; border-radius: 8px;
+      padding: 12px 16px; font-size: .8rem; color: #5d4037; margin-top: 16px; line-height: 1.5;
+    }
+    .back-link { margin-top: 28px; font-size: .8rem; text-align: center; }
+    .back-link a { color: #555; }
+  </style>
+</head>
+<body>
+
+<header>
+  <a href="index.html">← 返回首頁</a>
+  <h1>資料管理與刪除</h1>
+</header>
+
+<div class="container">
+
+  <!-- Section 1: Consent status -->
+  <p class="section-title">同意設定</p>
+  <div class="card">
+    <h3>你目前的同意狀態</h3>
+    <p>你可以隨時撤回非必要同意。撤回後，系統將立即停止對應資料的收集與使用。</p>
+    <div id="consent-list">
+      <!-- Populated by JS -->
+    </div>
+    <div class="notice">
+      ⚠️ 目前為前端示範版本。同意設定儲存於本瀏覽器。正式上線後將由帳號系統管理，可跨裝置生效。
+    </div>
+  </div>
+
+  <!-- Section 2: Download -->
+  <p class="section-title" style="margin-top:28px;">資料下載</p>
+  <div class="card">
+    <h3>下載個人資料副本</h3>
+    <p>下載包含你的同意記錄、對象檔案摘要與互動設定的 JSON 檔案。此功能展示資料可攜性；正式版本將包含完整帳號資料。</p>
+    <button class="action-btn" id="btn-download"><span class="icon">⬇️</span>下載我的資料（JSON）</button>
+    <div class="notif" id="notif-download">✅ 資料已產生，請查看瀏覽器下載。</div>
+  </div>
+
+  <!-- Section 3: Reset inference -->
+  <p class="section-title" style="margin-top:28px;">重置推論</p>
+  <div class="card">
+    <h3>重置對象模型</h3>
+    <p>清除系統根據你的回饋與互動紀錄建立的推論校準結果。帳號本身不受影響，但下次使用時分析將重新從基礎開始。</p>
+    <button class="action-btn" id="btn-reset-model">
+      <span class="icon">🔄</span>重置推論校準
+    </button>
+    <div class="confirm-panel" id="confirm-reset-model">
+      <p>將清除所有已校準的推論結果（例如語氣偏好、對象溝通模式估計）。你的帳號與對象檔案資料本身不會被刪除。</p>
+      <div class="btn-row">
+        <button class="btn-cancel" onclick="closeConfirm('confirm-reset-model')">取消</button>
+        <button class="btn-confirm" onclick="doAction('reset-model')">確認重置</button>
+      </div>
+    </div>
+    <div class="notif" id="notif-reset-model"></div>
+  </div>
+
+  <!-- Section 4: Delete -->
+  <p class="section-title" style="margin-top:28px;">刪除選項</p>
+
+  <div class="card">
+    <h3>刪除單次對話</h3>
+    <p>刪除特定一次的分析對話記錄，不影響對象檔案和其他互動。</p>
+    <button class="action-btn danger" id="btn-del-session">
+      <span class="icon">🗑️</span>刪除單次對話…
+    </button>
+    <div class="confirm-panel" id="confirm-del-session">
+      <p><strong>將刪除：</strong>選定對話的所有訊息、分析結果。<br>
+         <strong>不影響：</strong>對象檔案、帳號資料、其他對話。<br>
+         <strong>法定保留：</strong>無。刪除後無法復原。</p>
+      <div class="btn-row">
+        <button class="btn-cancel" onclick="closeConfirm('confirm-del-session')">取消</button>
+        <button class="btn-confirm" onclick="doAction('del-session')">確認刪除</button>
+      </div>
+    </div>
+    <div class="notif" id="notif-del-session"></div>
+  </div>
+
+  <div class="card">
+    <h3>刪除全部互動紀錄</h3>
+    <p>刪除所有分析對話記錄，保留帳號與對象檔案。</p>
+    <button class="action-btn danger" id="btn-del-history">
+      <span class="icon">🗑️</span>刪除全部互動紀錄…
+    </button>
+    <div class="confirm-panel" id="confirm-del-history">
+      <p><strong>將刪除：</strong>全部對話歷史、分析記錄、聊天輸入。<br>
+         <strong>不影響：</strong>帳號本身、對象檔案基本資料。<br>
+         <strong>完成時間：</strong>確認後立即停止使用，7 個工作天內正式完成刪除（含備份）。</p>
+      <div class="btn-row">
+        <button class="btn-cancel" onclick="closeConfirm('confirm-del-history')">取消</button>
+        <button class="btn-confirm" onclick="doAction('del-history')">確認刪除</button>
+      </div>
+    </div>
+    <div class="notif" id="notif-del-history"></div>
+  </div>
+
+  <div class="card">
+    <h3>刪除全部帳號資料</h3>
+    <p>刪除你的帳號、所有對象檔案、全部互動紀錄與同意記錄。此操作不可撤回。</p>
+    <button class="action-btn danger" id="btn-del-account">
+      <span class="icon">⚠️</span>刪除我的帳號與全部資料…
+    </button>
+    <div class="confirm-panel" id="confirm-del-account">
+      <p><strong>將永久刪除：</strong>帳號、所有對象檔案、全部對話、同意記錄、推論資料。<br>
+         <strong>訂閱影響：</strong>若有有效訂閱，退款依購買條款處理，請先聯繫客服確認。<br>
+         <strong>法定保留：</strong>交易記錄可能依法保留至少 7 年（澳洲 GST 要求）。<br>
+         <strong>完成時間：</strong>確認後 30 個工作天內正式完成所有刪除（含備份輪換）。</p>
+      <div class="btn-row">
+        <button class="btn-cancel" onclick="closeConfirm('confirm-del-account')">取消</button>
+        <button class="btn-confirm" onclick="doAction('del-account')">確認，永久刪除我的帳號</button>
+      </div>
+    </div>
+    <div class="notif" id="notif-del-account"></div>
+  </div>
+
+  <!-- Section 5: Correct -->
+  <p class="section-title" style="margin-top:28px;">更正資料</p>
+  <div class="card">
+    <h3>申請更正</h3>
+    <p>若你的出生資料、關係類型、互動紀錄或系統推論有誤，可以申請更正。正式版本將提供線上表單；目前請透過以下方式聯繫。</p>
+    <p>聯繫方式：<a href="mailto:keneyecue@gmail.com">keneyecue@gmail.com</a>，主旨請標明「資料更正申請」。</p>
+  </div>
+
+  <div class="back-link">
+    <a href="privacy-consent.html">← 查看或修改同意設定</a> &nbsp;·&nbsp;
+    <a href="index.html">返回首頁</a>
+  </div>
+
+</div>
+
+<script>
+  const CONSENT_LABELS = {
+    service:      { label: '使用服務（必要）', required: true },
+    profile:      { label: '保存對象檔案', required: false },
+    chat:         { label: '保存聊天紀錄', required: false },
+    model:        { label: '用於模型改善', required: false },
+    marketing:    { label: '行銷與個人化推薦', required: false },
+    third_party:  { label: '提供給人工顧問或第三方', required: false }
+  };
+
+  function loadConsent() {
+    try {
+      const raw = localStorage.getItem('kec_consent');
+      if (raw) return JSON.parse(raw).choices;
+    } catch (e) {}
+    return { service: 'yes' };
+  }
+
+  function saveConsent(choices) {
+    try {
+      localStorage.setItem('kec_consent', JSON.stringify({ choices, ts: Date.now() }));
+    } catch (e) {}
+  }
+
+  function renderConsent() {
+    const choices = loadConsent();
+    const list = document.getElementById('consent-list');
+    list.innerHTML = Object.entries(CONSENT_LABELS).map(([id, meta]) => {
+      const val = choices[id] || 'no';
+      const isActive = val === 'yes';
+      return `<div class="consent-row">
+        <div class="consent-label">
+          ${meta.label}
+          ${meta.required ? '<small>必要項目，無法撤回</small>' : ''}
+        </div>
+        ${meta.required
+          ? `<span class="toggle-btn active" style="cursor:default;">✓ 已同意</span>`
+          : `<button class="toggle-btn ${isActive ? 'active' : 'inactive'}"
+               data-id="${id}" onclick="toggleConsent('${id}')">
+               ${isActive ? '✓ 已同意' : '○ 未同意'}
+             </button>`
+        }
+      </div>`;
+    }).join('');
+  }
+
+  function toggleConsent(id) {
+    const choices = loadConsent();
+    choices[id] = choices[id] === 'yes' ? 'no' : 'yes';
+    saveConsent(choices);
+    renderConsent();
+    showGlobalNotif(`✅「${CONSENT_LABELS[id].label}」的同意設定已更新。`);
+  }
+
+  function showConfirm(id) {
+    document.querySelectorAll('.confirm-panel').forEach(p => p.classList.remove('visible'));
+    document.getElementById('confirm-' + id)?.classList.add('visible');
+  }
+
+  function closeConfirm(id) {
+    document.getElementById(id)?.classList.remove('visible');
+  }
+
+  let _globalNotifTimer;
+  function showGlobalNotif(msg) {
+    let el = document.getElementById('global-notif');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'global-notif';
+      el.style.cssText = `position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:10px 24px;border-radius:24px;font-size:.875rem;z-index:9999;`;
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.style.display = 'block';
+    clearTimeout(_globalNotifTimer);
+    _globalNotifTimer = setTimeout(() => { el.style.display = 'none'; }, 3000);
+  }
+
+  function showNotif(id, msg) {
+    const el = document.getElementById('notif-' + id);
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.add('visible');
+  }
+
+  function doAction(action) {
+    closeConfirm('confirm-' + action);
+    if (action === 'reset-model') {
+      try { localStorage.removeItem('kec_inference'); } catch (e) {}
+      showNotif('reset-model', '✅ 推論校準已重置。下次分析將從基礎重新建立。');
+    } else if (action === 'del-session') {
+      showNotif('del-session', '✅ 刪除申請已提交。單次對話記錄將在 7 個工作天內完成刪除。');
+    } else if (action === 'del-history') {
+      showNotif('del-history', '✅ 刪除申請已提交。全部互動紀錄將在 7 個工作天內完成刪除（含備份）。');
+    } else if (action === 'del-account') {
+      try { localStorage.clear(); } catch (e) {}
+      showNotif('del-account', '✅ 帳號刪除申請已提交。你的全部資料將在 30 個工作天內永久刪除（含備份輪換）。交易記錄依法律保留。');
+    }
+  }
+
+  document.getElementById('btn-download')?.addEventListener('click', () => {
+    const choices = loadConsent();
+    const data = {
+      exported_at: new Date().toISOString(),
+      note: '這是前端示範版本的資料副本。正式版本將包含完整帳號資料。',
+      consent_settings: choices,
+      data_categories: {
+        profile_files: '（正式版本：對象檔案清單）',
+        chat_history:  '（正式版本：互動紀錄摘要）',
+        inference_data: '（正式版本：推論校準資料）'
+      }
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'keneueye-my-data.json';
+    a.click(); URL.revokeObjectURL(url);
+    document.getElementById('notif-download').classList.add('visible');
+  });
+
+  ['del-session', 'del-history', 'del-account', 'reset-model'].forEach(id => {
+    document.getElementById('btn-' + id)?.addEventListener('click', () => showConfirm(id));
+  });
+
+  renderConsent();
+</script>
+</body>
+</html>

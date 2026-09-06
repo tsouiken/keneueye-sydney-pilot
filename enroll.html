@@ -84,9 +84,12 @@ hr { border: none; border-top: 1px solid #eee; margin: 24px 0; }
 <hr>
 
 <div class="form-group">
-<label>意向金 AUD $100（可全额退费）</label>
+<label>意向金 AUD $100（退费条件）</label>
 <p style="font-size:13px;color:#666;margin-bottom:8px;">
-先付 $100 意向金保留名额。如果最后决定不来，全额退费。完全没有风险。
+先付 $100 意向金保留名额。退费条件：<br>
+• 若你决定不来，<strong>提前 72 小时通知</strong>可全额退费。<br>
+• 若课程第一堂结束后 24 小时内认为不符预期，全额退费。<br>
+• 超过以上时限则退费申请需个案评估。
 </p>
 <div class="radio-group">
 <div class="radio-item"><input type="radio" name="deposit" value="yes" id="dep-yes"> <label for="dep-yes">我愿意付意向金 $100 保留名额</label></div>
@@ -99,11 +102,26 @@ hr { border: none; border-top: 1px solid #eee; margin: 24px 0; }
 <textarea name="notes" placeholder="有任何问题或特殊需求，请在这里写"></textarea>
 </div>
 
+<div class="form-group" style="margin-top:4px;">
+<label style="display:flex;align-items:flex-start;gap:8px;font-weight:400;cursor:pointer;">
+  <input type="checkbox" name="age_confirm" required style="width:auto;flex-shrink:0;margin-top:3px;">
+  <span>我已满 18 岁 <span style="color:#c00">*</span></span>
+</label>
+</div>
+
+<div class="form-group">
+<label style="display:flex;align-items:flex-start;gap:8px;font-weight:400;cursor:pointer;">
+  <input type="checkbox" name="consent_required" required style="width:auto;flex-shrink:0;margin-top:3px;">
+  <span>我了解 KenEyeCue 是沟通辅助与眉眼观察工具，不是人格诊断或命运预测；我同意将提供的资讯用于报名联系，并已阅读<a href="privacy-consent.html" style="color:#1a1a1a;">资料使用说明</a>。<span style="color:#c00">*</span></span>
+</label>
+</div>
+
 <button type="submit" class="btn">提交登记</button>
 
 <p class="note">
 提交后 Bonnie 会在 48 小时内与你联系。<br>
-你的资料仅用于本次课程报名，不会用于其他用途。
+你的资料仅用于本次课程报名，不会用于其他用途。<br>
+<a href="data-rights.html" style="color:#999;">了解如何查看、修改或删除你的资料 →</a>
 </p>
 
 </form>

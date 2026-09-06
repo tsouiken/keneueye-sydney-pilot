@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>隱私設定與同意 — KenEyeCue</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans TC', sans-serif;
+      background: #f5f5f5; color: #1a1a1a; min-height: 100vh;
+    }
+    header {
+      background: #1a1a1a; color: #fff; padding: 18px 24px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    header a { color: #ccc; text-decoration: none; font-size: .85rem; }
+    header a:hover { color: #fff; }
+    header h1 { font-size: 1.1rem; font-weight: 600; }
+
+    .container { max-width: 680px; margin: 0 auto; padding: 32px 24px 64px; }
+
+    .intro-card {
+      background: #fff; border-radius: 12px; padding: 28px 32px; margin-bottom: 24px;
+      border: 1px solid #e8e8e8;
+    }
+    .intro-card h2 { font-size: 1.2rem; margin-bottom: 12px; }
+    .intro-card p { font-size: .9rem; color: #555; line-height: 1.7; margin-bottom: 8px; }
+
+    /* Steps */
+    .step-indicator {
+      display: flex; gap: 6px; margin-bottom: 28px; align-items: center;
+    }
+    .step-dot {
+      width: 10px; height: 10px; border-radius: 50%; background: #ddd;
+      transition: background .2s;
+    }
+    .step-dot.active { background: #1a1a1a; }
+    .step-dot.done   { background: #4caf50; }
+    .step-label { font-size: .8rem; color: #888; margin-left: 6px; }
+
+    /* Consent card */
+    .consent-card {
+      background: #fff; border-radius: 12px; padding: 28px 32px;
+      border: 1px solid #e8e8e8; display: none;
+    }
+    .consent-card.active { display: block; }
+    .consent-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 8px; }
+    .consent-card .desc { font-size: .875rem; color: #555; line-height: 1.7; margin-bottom: 20px; }
+    .consent-card .desc ul { padding-left: 20px; margin-top: 6px; }
+    .consent-card .desc li { margin-bottom: 4px; }
+
+    .badge {
+      display: inline-block; font-size: .7rem; font-weight: 700; padding: 2px 8px;
+      border-radius: 4px; margin-left: 8px; vertical-align: middle;
+    }
+    .badge-required { background: #fee; color: #c00; }
+    .badge-optional { background: #e8f5e9; color: #388e3c; }
+
+    .choice-row {
+      display: flex; gap: 10px; flex-wrap: wrap;
+    }
+    .choice-btn {
+      flex: 1; min-width: 100px; padding: 12px 16px; border-radius: 8px;
+      border: 2px solid #e0e0e0; background: #fff; cursor: pointer;
+      font-size: .875rem; font-weight: 600; text-align: center;
+      transition: all .15s; color: #333;
+    }
+    .choice-btn:hover { border-color: #999; }
+    .choice-btn.selected-yes { border-color: #4caf50; background: #f1f8e9; color: #2e7d32; }
+    .choice-btn.selected-no  { border-color: #e53935; background: #fff3f3; color: #c62828; }
+    .choice-btn[data-choice="yes"]:hover { border-color: #4caf50; }
+    .choice-btn[data-choice="no"]:hover  { border-color: #e53935; }
+
+    .nav-row {
+      display: flex; gap: 10px; margin-top: 24px; justify-content: flex-end;
+    }
+    .btn-back {
+      padding: 10px 22px; border: 1px solid #ccc; border-radius: 8px;
+      background: #fff; color: #333; cursor: pointer; font-size: .875rem;
+    }
+    .btn-next {
+      padding: 10px 22px; border: none; border-radius: 8px;
+      background: #1a1a1a; color: #fff; cursor: pointer; font-size: .875rem; font-weight: 600;
+    }
+    .btn-next:disabled { background: #ccc; cursor: not-allowed; }
+
+    /* Summary */
+    #step-summary { display: none; }
+    .summary-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 0; border-bottom: 1px solid #f0f0f0; font-size: .875rem;
+    }
+    .summary-item:last-child { border-bottom: none; }
+    .summary-yes { color: #388e3c; font-weight: 600; }
+    .summary-no  { color: #c62828; font-weight: 600; }
+    .btn-submit {
+      width: 100%; padding: 14px; background: #1a1a1a; color: #fff;
+      border: none; border-radius: 10px; font-size: 1rem; font-weight: 700;
+      cursor: pointer; margin-top: 20px;
+    }
+    .btn-submit:hover { background: #333; }
+    .saved-note {
+      background: #e8f5e9; border: 1px solid #a5d6a7; border-radius: 8px;
+      padding: 14px 18px; font-size: .875rem; color: #2e7d32; margin-top: 16px;
+      display: none;
+    }
+    .notice {
+      background: #fff8e1; border: 1px solid #ffe082; border-radius: 8px;
+      padding: 12px 16px; font-size: .8rem; color: #5d4037; margin-top: 12px;
+      line-height: 1.5;
+    }
+    .link-row { margin-top: 20px; font-size: .8rem; color: #888; text-align: center; }
+    .link-row a { color: #1a1a1a; }
+  </style>
+</head>
+<body>
+
+<header>
+  <a href="index.html">← 返回首頁</a>
+  <h1>隱私設定與同意</h1>
+</header>
+
+<div class="container">
+
+  <div class="intro-card">
+    <h2>在開始之前，請了解我們如何使用你的資料</h2>
+    <p>KenEyeCue 會收集你輸入的出生資料、關係資訊與聊天內容，以提供溝通輔助分析。以下我們會逐項說明各類資料的用途，並請你分別做出選擇。</p>
+    <p>你可以拒絕非必要項目，仍然使用基本功能。同意可隨時在「<a href="data-rights.html">資料管理</a>」頁面撤回。</p>
+  </div>
+
+  <div class="step-indicator" id="step-indicator"></div>
+
+  <!-- Steps will be injected here -->
+  <div id="consent-steps"></div>
+
+  <!-- Summary -->
+  <div id="step-summary">
+    <div class="consent-card active">
+      <h3>你的同意設定摘要</h3>
+      <p class="desc">請確認以下設定。儲存後，你可以隨時在「資料管理」頁面修改。</p>
+      <div id="summary-list"></div>
+      <div class="notice">⚠️ 目前為前端示範版本，設定儲存於本裝置的瀏覽器。正式上線後將儲存於帳號系統，並可跨裝置管理。</div>
+      <button class="btn-submit" id="btn-save">儲存設定</button>
+      <div class="saved-note" id="saved-note">
+        ✅ 設定已儲存。你可以隨時在「<a href="data-rights.html">資料管理</a>」頁面查看或修改。
+      </div>
+      <div class="link-row">
+        <a href="data-rights.html">管理我的資料與刪除選項</a>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const STEPS = [
+    {
+      id: 'service',
+      title: '使用服務的必要同意',
+      badge: 'required',
+      desc: `使用 KenEyeCue 服務需要你同意以下基本條款：
+        <ul>
+          <li>本服務是溝通輔助工具，不是人格診斷、命運預測、心理治療或法律意見。</li>
+          <li>你了解系統輸出包含推測，推測不代表事實。</li>
+          <li>出生資料僅作為低信心的初始參考，不得作為判定他人價值或能力的唯一依據。</li>
+          <li>你同意不將本服務用於操控、欺騙、監控或歧視他人。</li>
+        </ul>
+        <strong>此項為必要同意。若不同意，無法使用本服務。</strong>`,
+      required: true
+    },
+    {
+      id: 'profile',
+      title: '保存對象檔案',
+      badge: 'optional',
+      desc: `你輸入的對象資料（出生日期、描述、互動筆記）可以被保存，以便下次繼續使用。
+        <ul>
+          <li>若不同意：分析完成後資料不會長期保存，每次使用需重新輸入。</li>
+          <li>保存資料加密存放，後台人員依職務最小權限存取。</li>
+          <li>你可以隨時刪除任何已保存的對象檔案。</li>
+        </ul>`,
+      required: false
+    },
+    {
+      id: 'chat',
+      title: '保存聊天紀錄',
+      badge: 'optional',
+      desc: `你輸入的聊天紀錄（截圖或文字）可以被保存，用於建立長期溝通分析。
+        <ul>
+          <li>若不同意：聊天紀錄在分析後不會長期保存。</li>
+          <li>保存的聊天紀錄不會被用於其他用途（除非你額外同意模型改善）。</li>
+          <li>你可以隨時要求刪除特定對話或全部紀錄。</li>
+        </ul>`,
+      required: false
+    },
+    {
+      id: 'model',
+      title: '將資料用於模型改善',
+      badge: 'optional',
+      desc: `是否同意將去識別化的互動資料用於改善 AI 分析品質。
+        <ul>
+          <li>若不同意：你的資料只用於提供服務，不用於模型訓練。</li>
+          <li>若同意：資料會先去識別化處理，再用於系統改善。</li>
+          <li>此同意不影響你使用任何功能。</li>
+        </ul>`,
+      required: false
+    },
+    {
+      id: 'marketing',
+      title: '行銷與個人化推薦',
+      badge: 'optional',
+      desc: `是否同意使用你的互動資料提供個人化課程推薦或行銷通知。
+        <ul>
+          <li>若不同意：你不會收到個人化推薦，功能不受影響。</li>
+          <li>若同意：系統可根據你的使用習慣推薦相關課程或內容。</li>
+        </ul>`,
+      required: false
+    },
+    {
+      id: 'third_party',
+      title: '提供給人工顧問或第三方服務商',
+      badge: 'optional',
+      desc: `是否同意在特定情境下，由人工顧問（Bonnie 或 Ken）存取你的分析資料以提供人工諮詢。
+        <ul>
+          <li>若不同意：資料不會被提供給任何人工顧問或第三方服務商。</li>
+          <li>若同意：僅在你主動要求人工諮詢時才會共享。</li>
+          <li>人工顧問有保密義務，不得複製或轉傳你的資料。</li>
+        </ul>`,
+      required: false
+    }
+  ];
+
+  const choices = {};
+  let currentStep = 0;
+
+  function buildIndicator() {
+    const el = document.getElementById('step-indicator');
+    el.innerHTML = STEPS.map((_, i) => `<div class="step-dot" id="dot-${i}"></div>`).join('') +
+      `<span class="step-label" id="step-label-text"></span>`;
+  }
+
+  function updateIndicator() {
+    STEPS.forEach((_, i) => {
+      const dot = document.getElementById(`dot-${i}`);
+      dot.className = 'step-dot' + (i < currentStep ? ' done' : i === currentStep ? ' active' : '');
+    });
+    document.getElementById('step-label-text').textContent = `步驟 ${currentStep + 1} / ${STEPS.length}`;
+  }
+
+  function buildSteps() {
+    const container = document.getElementById('consent-steps');
+    STEPS.forEach((step, i) => {
+      const card = document.createElement('div');
+      card.className = 'consent-card' + (i === 0 ? ' active' : '');
+      card.id = `step-${i}`;
+      card.innerHTML = `
+        <h3>${step.title} <span class="badge badge-${step.badge}">${step.badge === 'required' ? '必要' : '選填'}</span></h3>
+        <p class="desc">${step.desc}</p>
+        <div class="choice-row">
+          ${step.required
+            ? `<button class="choice-btn selected-yes" data-step="${i}" data-choice="yes" onclick="choose(${i}, 'yes')">✓ 我同意</button>`
+            : `<button class="choice-btn" data-step="${i}" data-choice="yes" onclick="choose(${i}, 'yes')">✓ 同意</button>
+               <button class="choice-btn" data-step="${i}" data-choice="no"  onclick="choose(${i}, 'no')">✗ 不同意</button>`
+          }
+        </div>
+        <div class="nav-row">
+          ${i > 0 ? `<button class="btn-back" onclick="goBack(${i})">← 上一步</button>` : ''}
+          <button class="btn-next" id="next-${i}" ${step.required ? '' : 'disabled'} onclick="goNext(${i})">
+            ${i === STEPS.length - 1 ? '查看摘要 →' : '下一步 →'}
+          </button>
+        </div>
+      `;
+      container.appendChild(card);
+      if (step.required) choices[step.id] = 'yes';
+    });
+  }
+
+  function choose(stepIdx, value) {
+    const step = STEPS[stepIdx];
+    choices[step.id] = value;
+    const card = document.getElementById(`step-${stepIdx}`);
+    card.querySelectorAll('.choice-btn').forEach(btn => {
+      btn.classList.remove('selected-yes', 'selected-no');
+      if (btn.dataset.choice === value) {
+        btn.classList.add(value === 'yes' ? 'selected-yes' : 'selected-no');
+      }
+    });
+    document.getElementById(`next-${stepIdx}`).disabled = false;
+  }
+
+  function goNext(stepIdx) {
+    document.getElementById(`step-${stepIdx}`).classList.remove('active');
+    if (stepIdx + 1 < STEPS.length) {
+      currentStep = stepIdx + 1;
+      document.getElementById(`step-${currentStep}`).classList.add('active');
+    } else {
+      currentStep = STEPS.length;
+      showSummary();
+    }
+    updateIndicator();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function goBack(stepIdx) {
+    document.getElementById(`step-${stepIdx}`).classList.remove('active');
+    currentStep = stepIdx - 1;
+    document.getElementById(`step-${currentStep}`).classList.add('active');
+    updateIndicator();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function showSummary() {
+    const labelMap = {};
+    STEPS.forEach(s => { labelMap[s.id] = s.title; });
+    const summaryEl = document.getElementById('summary-list');
+    summaryEl.innerHTML = STEPS.map(s => {
+      const val = choices[s.id];
+      return `<div class="summary-item">
+        <span>${s.title}</span>
+        <span class="${val === 'yes' ? 'summary-yes' : 'summary-no'}">${val === 'yes' ? '✓ 同意' : '✗ 不同意'}</span>
+      </div>`;
+    }).join('');
+    document.getElementById('step-summary').style.display = 'block';
+    document.getElementById('consent-steps').style.display = 'none';
+    const ind = document.getElementById('step-indicator');
+    ind.querySelectorAll('.step-dot').forEach(d => d.className = 'step-dot done');
+    document.getElementById('step-label-text').textContent = '摘要';
+  }
+
+  document.getElementById('btn-save')?.addEventListener('click', () => {
+    try {
+      localStorage.setItem('kec_consent', JSON.stringify({ choices, ts: Date.now() }));
+    } catch (e) {}
+    document.getElementById('saved-note').style.display = 'block';
+    document.getElementById('btn-save').textContent = '✓ 已儲存';
+    document.getElementById('btn-save').disabled = true;
+  });
+
+  buildIndicator();
+  buildSteps();
+  updateIndicator();
+</script>
+</body>
+</html>
