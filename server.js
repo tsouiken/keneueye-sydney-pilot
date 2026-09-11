@@ -577,6 +577,7 @@ const server = http.createServer(async (req, res) => {
         photo: order.photo || null,
         board: order.board || null,
         reportReady: !!(order.answers && order.photo),
+        duplicatePayment: Array.isArray(order.duplicatePayments) && order.duplicatePayments.length > 0,
         previewReady: !!order.preview,
         preview: order.preview || null,
         // ATM 待付款時要把虛擬帳號帶給對方，否則他不知道要轉去哪
@@ -649,6 +650,7 @@ const server = http.createServer(async (req, res) => {
         full: order.full || '',
         board: order.board || null,
         legacy: !order.token,
+        duplicatePayments: order.duplicatePayments || [],
         // 讓 Ken 能把報告連結直接貼給對方（舊訂單沒有 token，憑訂單號就開得了）
         reportUrl: '/quiz/report.html?order=' + order.id + (order.token ? '&token=' + order.token : '')
       });
@@ -681,6 +683,10 @@ const server = http.createServer(async (req, res) => {
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
       if (!orderAuthorized(order, body.token)) return sendJson(res, 404, { error: '案件不存在' });
+      // 已付款就不再開新的付款嘗試（兩個分頁各付一次＝收兩次錢）
+      if (order.status === 'paid') {
+        return sendJson(res, 409, { error: '這筆已經付款了', status: 'paid' });
+      }
       // 結果式付費：報告預覽出來之前不開放付款
       if (order.status !== 'preview_ready' && order.status !== 'atm_pending') {
         return sendJson(res, 409, { error: '報告尚未完成，還不能付款', status: order.status });
@@ -705,6 +711,9 @@ const server = http.createServer(async (req, res) => {
       const payRef = newPaymentRef();
       order.paymentRefs = order.paymentRefs || [];
       order.paymentRefs.push(payRef);
+      // 最新開出的這筆是「現行嘗試」。舊的 ref 留在 paymentRefs 供回傳查找——
+      // 綠界先扣款才通知我們，所以被取代的那筆若真的付成功，仍然要認（見回傳處理）。
+      order.activePaymentRef = payRef;
       saveOrders();
 
       const params = ecpay.buildOrderParams({
@@ -732,7 +741,8 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         return res.end('0|CheckMacValue 驗證失敗');
       }
-      const order = findCaseByTradeNo(params.MerchantTradeNo);
+      const ref = params.MerchantTradeNo;
+      const order = findCaseByTradeNo(ref);
       if (!order) {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         return res.end('0|訂單不存在');
@@ -753,6 +763,11 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': 'text/plain' });
             return res.end('1|OK');
           }
+          // 被取代的舊嘗試才取到號：不能蓋掉現行那筆的虛擬帳號
+          if (order.activePaymentRef && ref !== order.activePaymentRef) {
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            return res.end('1|OK');
+          }
           order.status = 'atm_pending';
           order.bankCode = params.BankCode || '';
           order.vAccount = params.vAccount;
@@ -763,11 +778,30 @@ const server = http.createServer(async (req, res) => {
             bankCode: order.bankCode, vAccount: order.vAccount, expireDate: order.expireDate
           });
           sendLine('【KenEyeCue ATM 待付】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n虛擬帳號：' + order.vAccount + '（' + order.bankCode + '）\n到期：' + order.expireDate + '\n→ 入帳後自動通知你');
+        } else if (order.status === 'paid') {
+          // 已經付過了又來一筆成功：伺服器擋不住（綠界先扣款才通知），
+          // 能做的是不覆蓋、不重發通知、記下來讓 Ken 退款。同一個 ref 重送＝綠界重試，no-op。
+          order.duplicatePayments = order.duplicatePayments || [];
+          const seen = order.duplicatePayments.some((d) => d.ref === ref);
+          if (ref !== order.paidRef && !seen) {
+            order.duplicatePayments.push({
+              ref, tradeNo: params.TradeNo || '', paymentDate: params.PaymentDate || '',
+              amount: Number(params.TotalAmount) || 0, receivedAt: new Date().toISOString()
+            });
+            saveOrders();
+            fireWebhook('order.duplicate_payment', {
+              orderId: order.id, amount: order.amount, tradeNo: params.TradeNo || '', paidTradeNo: order.tradeNo || ''
+            });
+            sendLine('【KenEyeCue 重複付款，需退款】\n訂單：' + order.id + '\n已入帳：' + (order.tradeNo || '—') + '\n重複的：' + (params.TradeNo || '—') + '（NT$' + order.amount + '）\n→ 請到綠界後台退這一筆');
+          }
         } else {
-          // 信用卡即時成功，或 ATM 第二段回傳＝已入帳
+          // 信用卡即時成功，或 ATM 第二段回傳＝已入帳。任何一筆嘗試都可以贏，
+          // 包括被取代的那筆——錢已經扣了，不認等於客戶付了錢卻拿不到報告。
           order.status = 'paid';
           order.paidAt = new Date().toISOString();
           order.tradeNo = params.TradeNo || '';
+          order.paidRef = ref;
+          order.activePaymentRef = ref;
           saveOrders();
           fireWebhook('order.paid', {
             orderId: order.id, amount: order.amount, result: order.result, board: order.board || null,

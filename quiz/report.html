@@ -47,6 +47,7 @@
 
   <!-- 完整報告（已付款） -->
   <div id="full-area" style="display:none">
+    <div id="dup-note" class="result-note" style="display:none;margin-bottom:16px">我們收到了兩筆付款。多的那一筆會退還給你，不用做任何事；有問題可以直接用你留的聯絡方式找我們。</div>
     <p class="kicker">完整報告</p>
     <h1 class="serif" style="font-size:26px">你的第一印象報告</h1>
     <div class="report-body" id="full-text"></div>
@@ -125,6 +126,7 @@
           return;
         }
         renderText(document.getElementById('full-text'), d.full);
+        if (d.duplicatePayment) document.getElementById('dup-note').style.display = 'block';
         show('full-area');
         return;
       }

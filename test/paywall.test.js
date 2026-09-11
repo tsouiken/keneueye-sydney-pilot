@@ -882,3 +882,134 @@ test('未付款照片配額：要把正在傳的這一張也算進去，且已�
   }).then(async (r) => ({ status: r.status }));
   assert.strictEqual(paidUp.status, 200, '已付款案件不該被未付款配額擋住');
 });
+
+test('信用卡：兩個分頁各付一次，第一筆算數、第二筆記成重複付款且不重發通知', async (t) => {
+  // 伺服器擋不住第二筆扣款（綠界先扣款才回傳）。能守的是：不覆蓋、不重發
+  // order.paid、記下來讓 Ken 退款；而且已付款之後不能再開新的付款嘗試。
+  const ecpayLib = require(path.join(__dirname, '..', 'lib', 'ecpay'));
+  const MID = '2000132', KEY = '5294y06JbISpM5x9', IV = 'v77hoKGq4kWxNIMEHK';
+  const hits = [];
+  const hook = require('node:http').createServer((rq, rs) => {
+    let b = '';
+    rq.on('data', (c) => { b += c; });
+    rq.on('end', () => { try { hits.push(JSON.parse(b)); } catch (_) {} rs.writeHead(200); rs.end('ok'); });
+  });
+  await new Promise((r) => hook.listen(0, '127.0.0.1', r));
+  const hookUrl = `http://127.0.0.1:${hook.address().port}/`;
+
+  const DI = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-dup-'));
+  const __ci = startServer({
+    DATA_DIR: DI, ADMIN_TOKEN, MAKE_WEBHOOK_URL: hookUrl,
+    ECPAY_MERCHANT_ID: MID, ECPAY_HASH_KEY: KEY, ECPAY_HASH_IV: IV
+  });
+  const BI = await __ci.ready;
+  t.after(() => { __ci.child.kill(); hook.close(); fs.rmSync(DI, { recursive: true, force: true }); });
+
+  const post = (url, body, headers) => fetch(BI + url, {
+    method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, headers || {}), body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+  const callback = (fields) => {
+    const params = { MerchantID: MID, TotalAmount: '499', RtnCode: '1', ...fields };
+    params.CheckMacValue = ecpayLib.checkMacValue(params, KEY, IV, 'sha256');
+    return fetch(BI + '/api/pay-callback', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(params).toString()
+    }).then((r) => r.text());
+  };
+
+  const c = await post('/api/case', { result: 'soft' });
+  const { orderId, token } = c.json;
+  const qs = await fetch(BI + '/api/questionnaire').then((r) => r.json());
+  const answers = {};
+  qs.questions.forEach((x) => { answers[x.id] = x.options[0]; });
+  await post('/api/delivery', { orderId, token, answers, contact: 'line:ken' });
+  await post('/api/upload-photo', { orderId, token, photo: TINY_PNG });
+  await post('/api/admin/report', { orderId, preview: '預覽', full: '完整' }, { 'x-admin-token': ADMIN_TOKEN });
+
+  // 兩個分頁各開一筆嘗試
+  const a = await post('/api/order', { orderId, token });
+  const b = await post('/api/order', { orderId, token });
+  const refA = a.json.formFields.MerchantTradeNo;
+  const refB = b.json.formFields.MerchantTradeNo;
+  assert.notStrictEqual(refA, refB);
+
+  // B 先成功入帳
+  assert.strictEqual(await callback({ MerchantTradeNo: refB, TradeNo: 'TN-B', PaymentDate: '2026/09/11 10:00:00' }), '1|OK');
+  let rep = await fetch(BI + `/api/report?order=${orderId}&token=${token}`).then((r) => r.json());
+  assert.strictEqual(rep.status, 'paid');
+  assert.strictEqual(rep.full, '完整');
+  assert.strictEqual(rep.duplicatePayment, false);
+
+  // A 也成功了（綠界已經扣款）：要 ack，但不覆蓋、不重發，記成重複付款
+  assert.strictEqual(await callback({ MerchantTradeNo: refA, TradeNo: 'TN-A', PaymentDate: '2026/09/11 10:00:05' }), '1|OK', '不 ack 綠界會一直重送');
+  rep = await fetch(BI + `/api/report?order=${orderId}&token=${token}`).then((r) => r.json());
+  assert.strictEqual(rep.status, 'paid');
+  assert.strictEqual(rep.duplicatePayment, true, '要讓客戶知道多的那筆會退');
+  const onDisk = JSON.parse(fs.readFileSync(path.join(DI, 'orders.json'), 'utf8'))[orderId];
+  assert.strictEqual(onDisk.tradeNo, 'TN-B', '入帳的仍是第一筆');
+  assert.strictEqual(onDisk.paidRef, refB);
+  assert.strictEqual(onDisk.duplicatePayments.length, 1);
+  assert.strictEqual(onDisk.duplicatePayments[0].ref, refA);
+  assert.strictEqual(onDisk.duplicatePayments[0].tradeNo, 'TN-A');
+
+  // 同一筆重送（綠界重試）＝ no-op，不會再記一次
+  assert.strictEqual(await callback({ MerchantTradeNo: refA, TradeNo: 'TN-A', PaymentDate: '2026/09/11 10:00:05' }), '1|OK');
+  const again = JSON.parse(fs.readFileSync(path.join(DI, 'orders.json'), 'utf8'))[orderId];
+  assert.strictEqual(again.duplicatePayments.length, 1, '同一個 ref 重送不該再記一筆');
+
+  // 後台看得到要退的那筆
+  const detail = await fetch(BI + '/api/admin/case/' + orderId, { headers: { 'x-admin-token': ADMIN_TOKEN } }).then((r) => r.json());
+  assert.strictEqual(detail.duplicatePayments.length, 1);
+
+  // 已付款之後不能再開新的付款嘗試
+  const third = await post('/api/order', { orderId, token });
+  assert.strictEqual(third.status, 409);
+  assert.strictEqual(third.json.status, 'paid');
+
+  // webhook：恰一次 order.paid、恰一次 order.duplicate_payment
+  await new Promise((r) => setTimeout(r, 300));
+  assert.strictEqual(hits.filter((h) => h.event === 'order.paid').length, 1, 'order.paid 只能發一次');
+  const dups = hits.filter((h) => h.event === 'order.duplicate_payment');
+  assert.strictEqual(dups.length, 1);
+  assert.strictEqual(dups[0].tradeNo, 'TN-A');
+});
+
+test('ATM：被取代的舊嘗試晚到的取號通知，不能蓋掉現行那筆的虛擬帳號', async (t) => {
+  const ecpayLib = require(path.join(__dirname, '..', 'lib', 'ecpay'));
+  const MID = '2000132', KEY = '5294y06JbISpM5x9', IV = 'v77hoKGq4kWxNIMEHK';
+  const DJ = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-atm-stale-'));
+  const __cj = startServer({ DATA_DIR: DJ, ADMIN_TOKEN, ECPAY_MERCHANT_ID: MID, ECPAY_HASH_KEY: KEY, ECPAY_HASH_IV: IV, ECPAY_CHOOSE_PAYMENT: 'ALL' });
+  const BJ = await __cj.ready;
+  t.after(() => { __cj.child.kill(); fs.rmSync(DJ, { recursive: true, force: true }); });
+  const post = (url, body, headers) => fetch(BJ + url, {
+    method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, headers || {}), body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+  const callback = (fields) => {
+    const params = { MerchantID: MID, TotalAmount: '499', RtnCode: '1', ...fields };
+    params.CheckMacValue = ecpayLib.checkMacValue(params, KEY, IV, 'sha256');
+    return fetch(BJ + '/api/pay-callback', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(params).toString()
+    }).then((r) => r.text());
+  };
+  const c = await post('/api/case', { result: 'soft' });
+  const { orderId, token } = c.json;
+  const qs = await fetch(BJ + '/api/questionnaire').then((r) => r.json());
+  const answers = {};
+  qs.questions.forEach((x) => { answers[x.id] = x.options[0]; });
+  await post('/api/delivery', { orderId, token, answers, contact: 'line:ken' });
+  await post('/api/upload-photo', { orderId, token, photo: TINY_PNG });
+  await post('/api/admin/report', { orderId, preview: 'p', full: 'f' }, { 'x-admin-token': ADMIN_TOKEN });
+
+  // 開 A、再開 B（B 是現行嘗試）；B 先取到號，A 的取號通知才晚到
+  const a = await post('/api/order', { orderId, token });
+  const b = await post('/api/order', { orderId, token });
+  const refA = a.json.formFields.MerchantTradeNo;
+  const refB = b.json.formFields.MerchantTradeNo;
+  const future = new Date(Date.now() + 5 * 86400e3).toISOString().slice(0, 10).replace(/-/g, '/');
+  await callback({ MerchantTradeNo: refB, vAccount: '2222222222', BankCode: '822', ExpireDate: future });
+  await callback({ MerchantTradeNo: refA, vAccount: '1111111111', BankCode: '822', ExpireDate: future });
+  const rep = await fetch(BJ + `/api/report?order=${orderId}&token=${token}`).then((r) => r.json());
+  assert.strictEqual(rep.status, 'atm_pending');
+  assert.strictEqual(rep.vAccount, '2222222222', '現行那筆的帳號不能被舊嘗試晚到的通知蓋掉');
+});
