@@ -78,11 +78,12 @@ function fireWebhook(event, payload) {
 }
 
 // LINE 成交通知（用官方帳號 token 直接推給 Ken；留空 = 不發送，不影響既有流程）
-const LINE_ACCESS_TOKEN = process.env.LINE_ACCESS_TOKEN || '';
-const LINE_OWNER_ID = process.env.LINE_OWNER_ID || '';
+const LINE_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
+const KEN_LINE_USER_ID = process.env.KEN_LINE_USER_ID || '';
+const LINE_NOTIFY_ON_DEMO = process.env.LINE_NOTIFY_ON_DEMO === '1';
 function sendLine(text) {
-  if (!LINE_ACCESS_TOKEN || !LINE_OWNER_ID) return;
-  const body = JSON.stringify({ to: LINE_OWNER_ID, messages: [{ type: 'text', text }] });
+  if (!LINE_ACCESS_TOKEN || !KEN_LINE_USER_ID) return;
+  const body = JSON.stringify({ to: KEN_LINE_USER_ID, messages: [{ type: 'text', text }] });
   // 必須用 https：http.request 收到 https:// 會同步拋 ERR_INVALID_PROTOCOL，
   // req.on('error') 攔不到，會讓呼叫端整個 500。
   const req = https.request('https://api.line.me/v2/bot/message/push', {
@@ -122,16 +123,14 @@ function saveOrders() {
   try { fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2)); } catch (_) { /* 唯讀環境不阻斷 */ }
 }
 
-// 舊資料遷移：結果式付費之前建立的訂單沒有 token，也用舊的狀態名。
-// 不補的話，既有（含已付款）客戶會被 tokenOk 永遠擋在門外，
-// 後台產生的報告連結也會變成 t=undefined。
+// 舊訂單（token 上線前建立的）沒有 token。這些客戶唯一拿過的憑證就是
+// success.html?order=ID，補 token 反而把他們鎖在門外——所以永遠不補，
+// 授權規則見 orderAuthorized()。這裡只把舊的 pending 對應到新流程的 open。
 function migrateLegacyOrders() {
   let changed = 0;
+  let legacy = 0;
   Object.values(orders).forEach(function (o) {
-    if (!o.token) {
-      o.token = crypto.randomBytes(16).toString('hex');
-      changed++;
-    }
+    if (!o.token) legacy++;
     // 舊的 pending＝訂單已建立、還沒付款，對應新流程的 open
     if (o.status === 'pending') {
       o.status = 'open';
@@ -140,8 +139,9 @@ function migrateLegacyOrders() {
   });
   if (changed) {
     saveOrders();
-    console.log('[migrate] 補齊 ' + changed + ' 筆舊訂單欄位');
+    console.log('[migrate] ' + changed + ' 筆舊訂單 pending → open');
   }
+  if (legacy) console.log('[legacy] ' + legacy + ' 筆無 token 的舊訂單，憑訂單號存取');
 }
 migrateLegacyOrders();
 
@@ -191,15 +191,35 @@ function findCaseByTradeNo(no) {
   }) || null;
 }
 
-function createCase(result) {
+// 董事會資料只存白名單欄位（top 前 3 的 key/role ＋ 四血條），避免塞入任意物件
+function sanitizeBoard(board) {
+  if (!board || typeof board !== 'object' || !Array.isArray(board.top)) return null;
+  return {
+    top: board.top.slice(0, 3).map(function (m) {
+      return {
+        key: String((m && m.key) || '').slice(0, 20),
+        role: String((m && m.role) || '').slice(0, 40)
+      };
+    }),
+    bars: board.bars && typeof board.bars === 'object' ? {
+      B1: Number(board.bars.B1) || 0,
+      B2: Number(board.bars.B2) || 0,
+      B3: Number(board.bars.B3) || 0,
+      B4: Number(board.bars.B4) || 0
+    } : null
+  };
+}
+
+function createCase(result, board) {
   const ts = new Date().toISOString().replace(/\D/g, '').slice(0, 14); // 14 位
   const rand = String(Math.floor(Math.random() * 900) + 100);           // 3 位
   const id = 'KC' + ts + rand;                                          // 19 字元 ≤ 20
   orders[id] = {
     id,
-    // 存取用的隨機 token：報告與照片網址都要帶，避免靠猜訂單號翻到別人的資料
-    token: crypto.randomBytes(16).toString('hex'),
+    // 高熵存取憑證：報告與付款網址都要帶，避免靠猜訂單號翻到別人的資料
+    token: crypto.randomBytes(24).toString('hex'),
     result: result || '',
+    board: sanitizeBoard(board) || null,
     amount: PRICE,
     status: 'open',
     createdAt: new Date().toISOString()
@@ -222,13 +242,18 @@ function adminOk(req) {
   return crypto.timingSafeEqual(a, b);
 }
 
-// token 比對（長度不同直接失敗，避免 timingSafeEqual 丟例外）
-function tokenOk(order, token) {
-  if (!order || typeof token !== 'string') return false;
-  const a = Buffer.from(order.token || '', 'utf8');
-  const b = Buffer.from(token, 'utf8');
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+// 常數時間比對：token 長度不同 → 直接視為不符
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
+// 訂單授權：token 上線前的舊訂單（無 token）維持以 orderId 為憑證，
+// 新訂單一律要求高熵 token（錯 token 視為不存在，防列舉）
+function orderAuthorized(order, token) {
+  if (!order) return false;
+  if (!order.token) return true;
+  return safeEqual(order.token, token);
 }
 
 // 聯絡方式正規化：大小寫、空白不該讓同一個人被當成兩個人
@@ -271,7 +296,7 @@ function markSubmittedIfComplete(order) {
   if (order.status === 'open') {
     order.status = 'submitted';
     order.submittedAt = new Date().toISOString();
-    fireWebhook('case.submitted', { orderId: order.id, result: order.result, contact: order.contact || '' });
+    fireWebhook('case.submitted', { orderId: order.id, result: order.result, board: order.board || null, contact: order.contact || '' });
     sendLine('【KenEyeCue 待分析】\n案件：' + order.id + '\n測驗：' + (order.result || '—') + '\n聯絡：' + (order.contact || '—') + '\n→ 問卷與照片已收齊，可以開始寫報告');
     return;
   }
@@ -279,7 +304,7 @@ function markSubmittedIfComplete(order) {
   // 但資料剛收齊一樣要通知——而且這種更該先寫，錢已經收了。
   if (order.status === 'paid' && !order.full && !order.submittedAt) {
     order.submittedAt = new Date().toISOString();
-    fireWebhook('case.submitted', { orderId: order.id, result: order.result, contact: order.contact || '' });
+    fireWebhook('case.submitted', { orderId: order.id, result: order.result, board: order.board || null, contact: order.contact || '' });
     sendLine('【KenEyeCue 待分析（已付款）】\n案件：' + order.id + '\n測驗：' + (order.result || '—') + '\n聯絡：' + (order.contact || '—') + '\n→ 舊流程的付款案件補齊資料了，請優先寫');
   }
 }
@@ -297,21 +322,16 @@ const MIME = {
   '.ico': 'image/x-icon'
 };
 
-// 靜態檔採白名單。ROOT 底下不是每個檔都該讓人下載：DATA_DIR 沒設時
-// orders.json（所有客戶的作答、報告內容、token、聯絡方式）就落在這裡，
-// 旁邊還有 .env、server.js、test/、node_modules/。之前是「除了 API 都給」，
-// 等於 GET /orders.json 就能繞過整道付費牆，順便把 token 一起帶走。
-const PUBLIC_FILES = new Set([
-  'index.html',
-  'enroll.html',
-  'firstimpression.html',
-  'report.html'
-]);
-const PUBLIC_DIRS = ['quiz'];
-
-function isPublicPath(rel) {
-  if (PUBLIC_FILES.has(rel)) return true;
-  return PUBLIC_DIRS.some((d) => rel === d || rel.startsWith(d + '/'));
+// 白名單：只服務明確公開的根目錄頁面與 quiz/ 資源，其餘一律 404
+// （避免 /orders.json、/.env、/server.js、/package.json、test/、docs/ 等被直接讀取；
+//   DATA_DIR 沒設時 orders.json 就在專案根目錄，和靜態檔同一個地方）
+function isPublicStatic(rel, pathname) {
+  if (pathname === '/' || pathname === '') return true;
+  if (pathname === '/quiz' || pathname === '/quiz/') return true;
+  const ROOT_PAGES = new Set(['index.html', 'firstimpression.html', 'enroll.html', 'report.html']);
+  if (ROOT_PAGES.has(rel)) return true;
+  if (/^quiz\/[A-Za-z0-9._-]+$/.test(rel) && /\.(html|css|js|png|jpg|jpeg|svg|ico)$/.test(rel)) return true;
+  return false;
 }
 
 function serveStatic(req, res, pathname) {
@@ -327,7 +347,7 @@ function serveStatic(req, res, pathname) {
     rel = path.join('quiz', 'index.html');
   } else {
     rel = pathname.replace(/^\/+/, '');
-    if (!isPublicPath(rel)) {
+    if (!isPublicStatic(rel, pathname)) {
       res.writeHead(404); res.end('Not Found'); return;
     }
   }
@@ -365,7 +385,7 @@ function readBody(req, limit = MAX_BODY) {
         over = true;
         raw = '';
         const err = new Error('請求內容太大');
-        err.tooLarge = true;
+        err.statusCode = 413;
         reject(err);
       }
     });
@@ -441,8 +461,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/delivery' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
-      if (!tokenOk(order, body.token)) return sendJson(res, 403, { ok: false, error: '存取碼不正確' });
+      if (!orderAuthorized(order, body.token)) return sendJson(res, 404, { ok: false, error: '案件不存在' });
       const contact = String(body.contact || '').trim();
       if (contact.length < 3) return sendJson(res, 400, { ok: false, error: '請留下聯絡方式，報告好了才通知得到你' });
 
@@ -488,7 +507,7 @@ const server = http.createServer(async (req, res) => {
       // （.env.example 與 docs/make-automation.md 都這樣寫）。
       if (firstTime) {
         fireWebhook('order.created', {
-          orderId: order.id, result: order.result || '', amount: order.amount, contact
+          orderId: order.id, board: order.board || null, result: order.result || '', amount: order.amount, contact
         });
       }
       return sendJson(res, 200, { ok: true, orderId: order.id, status: order.status });
@@ -500,8 +519,7 @@ const server = http.createServer(async (req, res) => {
       }
       const body = JSON.parse((await readBody(req, MAX_PHOTO_BODY)) || '{}');
       const order = orders[body.orderId];
-      if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
-      if (!tokenOk(order, body.token)) return sendJson(res, 403, { ok: false, error: '存取碼不正確' });
+      if (!orderAuthorized(order, body.token)) return sendJson(res, 404, { ok: false, error: '案件不存在' });
       // 擋的是「換掉報告所依據的照片」。還沒有照片的舊 paid 案件要補得上來，
       // 否則付過錢的人既補不了資料也拿不到報告。實際比對放在拿到 buffer 之後。
       const data = body.photo; // data URL 或 base64
@@ -535,7 +553,7 @@ const server = http.createServer(async (req, res) => {
       const ext = m[1] === 'image/png' ? 'png' : 'jpg';
       // 檔名帶 token：/uploads/* 是公開靜態路徑，未付款者的照片也會存在這裡，
       // 檔名必須猜不到，否則靠訂單號就能翻到別人的臉。
-      const fname = `photo-${order.id}-${order.token.slice(0, 16)}.${ext}`;
+      const fname = `photo-${order.id}-${crypto.randomBytes(8).toString('hex')}.${ext}`;
       fs.writeFileSync(path.join(UPLOAD_DIR, fname), buf);
       order.photo = '/uploads/' + fname;
       order.photoSubmittedAt = new Date().toISOString();
@@ -547,8 +565,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/report' && req.method === 'GET') {
       const qs = new URLSearchParams(u.search);
       const order = orders[qs.get('order') || ''];
-      if (!order) return sendJson(res, 404, { error: '案件不存在' });
-      if (!tokenOk(order, qs.get('t'))) return sendJson(res, 403, { error: '存取碼不正確' });
+      if (!orderAuthorized(order, qs.get('token') || '')) return sendJson(res, 404, { error: '案件不存在' });
 
       const paid = order.status === 'paid';
       const payload = {
@@ -558,6 +575,8 @@ const server = http.createServer(async (req, res) => {
         result: order.result || '',
         answers: order.answers || null,
         photo: order.photo || null,
+        board: order.board || null,
+        reportReady: !!(order.answers && order.photo),
         previewReady: !!order.preview,
         preview: order.preview || null,
         // ATM 待付款時要把虛擬帳號帶給對方，否則他不知道要轉去哪
@@ -577,7 +596,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 429, { error: '短時間內開太多案件了，請稍後再試。' });
       }
       const body = JSON.parse((await readBody(req)) || '{}');
-      const order = createCase(body.result);
+      const order = createCase(body.result, body.board);
       return sendJson(res, 200, { orderId: order.id, token: order.token });
     }
 
@@ -628,8 +647,10 @@ const server = http.createServer(async (req, res) => {
         photo: order.photo || null,
         preview: order.preview || '',
         full: order.full || '',
-        // 讓 Ken 能把報告連結直接貼給對方
-        reportUrl: '/quiz/report.html?order=' + order.id + '&t=' + order.token
+        board: order.board || null,
+        legacy: !order.token,
+        // 讓 Ken 能把報告連結直接貼給對方（舊訂單沒有 token，憑訂單號就開得了）
+        reportUrl: '/quiz/report.html?order=' + order.id + (order.token ? '&token=' + order.token : '')
       });
     }
 
@@ -652,15 +673,14 @@ const server = http.createServer(async (req, res) => {
       }
       order.reportReadyAt = new Date().toISOString();
       saveOrders();
-      fireWebhook('case.preview_ready', { orderId: order.id, contact: order.contact || '' });
+      fireWebhook('case.preview_ready', { orderId: order.id, board: order.board || null, contact: order.contact || '' });
       return sendJson(res, 200, { ok: true, orderId: order.id, status: order.status });
     }
 
     if (p === '/api/order' && req.method === 'POST') {
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order) return sendJson(res, 404, { error: '案件不存在' });
-      if (!tokenOk(order, body.token)) return sendJson(res, 403, { error: '存取碼不正確' });
+      if (!orderAuthorized(order, body.token)) return sendJson(res, 404, { error: '案件不存在' });
       // 結果式付費：報告預覽出來之前不開放付款
       if (order.status !== 'preview_ready' && order.status !== 'atm_pending') {
         return sendJson(res, 409, { error: '報告尚未完成，還不能付款', status: order.status });
@@ -696,7 +716,7 @@ const server = http.createServer(async (req, res) => {
         returnUrl: `${BASE_URL}/api/pay-callback`,
         // 帶上 token：success.html 要靠它組出完整報告連結，
         // 少了它真的付完錢的人會回到一個打不開報告的頁面。
-        clientBackUrl: `${BASE_URL}/quiz/success.html?order=${order.id}&t=${order.token}`,
+        clientBackUrl: `${BASE_URL}/quiz/success.html?order=${order.id}&token=${order.token}`,
         alg: ECPAY.alg,
         choosePayment: ECPAY.choosePayment
       });
@@ -750,7 +770,7 @@ const server = http.createServer(async (req, res) => {
           order.tradeNo = params.TradeNo || '';
           saveOrders();
           fireWebhook('order.paid', {
-            orderId: order.id, amount: order.amount, result: order.result,
+            orderId: order.id, amount: order.amount, result: order.result, board: order.board || null,
             tradeNo: order.tradeNo, method: vAccount ? 'ATM' : 'Credit'
           });
           sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：' + (vAccount ? 'ATM' : 'Credit') + '\n→ 完整報告已解鎖');
@@ -762,24 +782,29 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/demo-pay' && req.method === 'POST') {
       // 只在模擬模式開放：正式接上綠界後，這條等於免費解鎖完整報告
-      if (!DEMO) return sendJson(res, 404, { ok: false, error: '不存在' });
+      if (!DEMO) return sendJson(res, 403, { ok: false, error: '未開放模擬付款' });
       const body = JSON.parse((await readBody(req)) || '{}');
       const order = orders[body.orderId];
-      if (!order) return sendJson(res, 404, { ok: false, error: '案件不存在' });
-      if (!tokenOk(order, body.token)) return sendJson(res, 403, { ok: false, error: '存取碼不正確' });
+      if (!orderAuthorized(order, body.token)) return sendJson(res, 404, { ok: false, error: '案件不存在' });
+      // 模擬付款也要守結果式付費的規則：預覽出來之前不能付
+      if (order.status !== 'preview_ready' && order.status !== 'atm_pending') {
+        return sendJson(res, 409, { ok: false, error: '報告尚未完成，還不能付款', status: order.status });
+      }
       order.status = 'paid';
       order.paidAt = new Date().toISOString();
       order.tradeNo = 'DEMO-' + order.id;
       saveOrders();
-      fireWebhook('order.paid', { orderId: order.id, amount: order.amount, result: order.result, tradeNo: order.tradeNo, method: 'DEMO' });
-      sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：DEMO\n→ 完整報告已解鎖');
+      fireWebhook('order.paid', { orderId: order.id, amount: order.amount, result: order.result, board: order.board || null, tradeNo: order.tradeNo, method: 'DEMO' });
+      // 模擬付款預設不推 LINE（測試會一直吵）；要看通知就設 LINE_NOTIFY_ON_DEMO=1
+      if (LINE_NOTIFY_ON_DEMO) sendLine('【KenEyeCue 成單通知】\n訂單：' + order.id + '\n金額：NT$' + order.amount + '\n測驗：' + (order.result || '—') + '\n方式：DEMO\n→ 完整報告已解鎖');
       return sendJson(res, 200, { ok: true, orderId: order.id });
     }
 
     const orderMatch = p.match(/^\/api\/order\/([A-Za-z0-9]+)$/);
     if (orderMatch && req.method === 'GET') {
       const order = orders[orderMatch[1]];
-      if (!order) return sendJson(res, 404, { error: '訂單不存在' });
+      const token = new URLSearchParams(u.search).get('token') || '';
+      if (!orderAuthorized(order, token)) return sendJson(res, 404, { error: '訂單不存在' });
       return sendJson(res, 200, { id: order.id, status: order.status, amount: order.amount, result: order.result });
     }
 
@@ -788,8 +813,8 @@ const server = http.createServer(async (req, res) => {
 
     res.writeHead(405); res.end('Method Not Allowed');
   } catch (err) {
-    if (err && err.tooLarge) {
-      return sendJson(res, 413, { ok: false, error: '內容太大，請換一張小一點的照片。' });
+    if (err && err.statusCode) {
+      return sendJson(res, err.statusCode, { ok: false, error: err.message || '請求無效' });
     }
     sendJson(res, 500, { error: '伺服器錯誤' });
   }

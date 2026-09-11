@@ -225,10 +225,18 @@
       if (r.status !== 200) { alert('讀取失敗'); return; }
       current = r.json;
       $('d-id').textContent = current.id;
-      $('d-meta').textContent =
-        '狀態：' + current.status +
+      var meta = '狀態：' + current.status +
         '｜測驗：' + (current.result || '—') +
-        '｜聯絡：' + (current.contact || '—');
+        '｜聯絡：' + (current.contact || '—') +
+        (current.legacy ? '｜舊訂單（無存取碼，憑編號開啟）' : '');
+      if (current.board && current.board.top && current.board.top.length) {
+        var BAR_LABEL = { B1: '攻守', B2: '內外', B3: '剛柔', B4: '快慢' };
+        var bars = current.board.bars || {};
+        meta += '\n董事會：' + current.board.top.map(function (m) { return m.role; }).join('、') +
+          '｜' + Object.keys(BAR_LABEL).map(function (k) { return BAR_LABEL[k] + ' ' + (bars[k] != null ? bars[k] : '—'); }).join(' · ');
+      }
+      $('d-meta').textContent = meta;
+      $('d-meta').style.whiteSpace = 'pre-line';
 
       if (current.photo) {
         $('d-photo').src = current.photo;

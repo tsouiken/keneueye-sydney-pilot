@@ -47,7 +47,7 @@
     <p class="fineprint">把這一頁的網址存起來，之後可以直接回來看報告。</p>
   </div>
 
-  <p class="fineprint">測驗與報告僅供參考，不構成任何保證。</p>
+  <p class="fineprint">測驗與報告僅供個人參考，請依自己的實際情況判斷。</p>
 
 </div>
 
@@ -58,7 +58,7 @@
   var dim = params.get('r') || '';
 
   var orderId = params.get('order') || '';
-  var token = params.get('t') || '';
+  var token = params.get('token') || '';
 
   var QUESTIONS = [];
   var answers = {};
@@ -77,13 +77,29 @@
     msg.style.color = color || '';
   }
 
+  // 從董事會結果頁進來：把角色與血條一起帶進案件（伺服器只存白名單欄位）
+  var fromBoard = params.get('from') === 'board';
+  var boardPayload = null;
+  var boardLabel = '';
+  if (fromBoard) {
+    var boardResult = null;
+    try { boardResult = JSON.parse(localStorage.getItem('zw_result')); } catch (_) {}
+    if (boardResult && boardResult.top && boardResult.top.length) {
+      boardPayload = {
+        top: boardResult.top.map(function (s) { return { key: s.key, role: s.role }; }),
+        bars: boardResult.bars || null
+      };
+      boardLabel = '董事會：' + boardResult.top.map(function (s) { return s.role; }).join('、');
+    }
+  }
+
   // 建案件（若網址沒帶就新建一個）
   function ensureCase() {
     if (orderId && token) return Promise.resolve();
     return fetch('/api/case', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ result: dim })
+      body: JSON.stringify({ result: boardLabel || dim, board: boardPayload })
     })
       .then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (d) {
@@ -101,7 +117,8 @@
         token = d.token;
         // 寫進網址，重新整理不會掉
         history.replaceState(null, '', 'submit.html?r=' + encodeURIComponent(dim) +
-          '&order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token));
+          (fromBoard ? '&from=board' : '') +
+          '&order=' + encodeURIComponent(orderId) + '&token=' + encodeURIComponent(token));
       });
   }
 
@@ -192,7 +209,7 @@
       })
       .then(function (d) {
         if (!d.ok) throw new Error(d.error || '照片上傳失敗');
-        var url = 'report.html?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token);
+        var url = 'report.html?order=' + encodeURIComponent(orderId) + '&token=' + encodeURIComponent(token);
         document.getElementById('done-id').textContent = orderId;
         document.getElementById('btn-goto-report').href = url;
         document.getElementById('form-area').style.display = 'none';

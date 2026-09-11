@@ -31,7 +31,7 @@
     <p class="fineprint">入帳後完整報告會自動解鎖，這一頁重新整理就看得到。</p>
   </div>
 
-  <p class="fineprint">測驗與報告僅供參考，不構成任何保證。</p>
+  <p class="fineprint">測驗與報告僅供個人參考，請依自己的實際情況判斷。</p>
 
 </div>
 
@@ -40,7 +40,7 @@
   'use strict';
   var params = new URLSearchParams(location.search);
   var orderId = params.get('order') || '';
-  var token = params.get('t') || '';
+  var token = params.get('token') || '';
 
   var icon = document.getElementById('status-icon');
   var title = document.getElementById('status-title');
@@ -56,11 +56,10 @@
   document.getElementById('order-id').textContent = orderId;
   document.getElementById('order-line').style.display = 'block';
 
-  // 有 token 就走 /api/report（同一支就帶得出 ATM 明細，且有存取碼保護）；
-  // 沒 token 只能查狀態，ATM 明細不該靠訂單號就拿得到。
-  var lookup = token
-    ? '/api/report?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token)
-    : '/api/order/' + encodeURIComponent(orderId);
+  // 單一查詢路徑。token 上線前的舊訂單沒有 token，憑訂單號就能查（伺服器端
+  // orderAuthorized 放行）；新訂單沒帶 token 會是 404，那就明講要用完整連結。
+  var lookup = '/api/report?order=' + encodeURIComponent(orderId) + '&token=' + encodeURIComponent(token);
+  var reportHref = 'report.html?order=' + encodeURIComponent(orderId) + (token ? '&token=' + encodeURIComponent(token) : '');
 
   // 綠界可能比它自己的付款通知還早把人導回這一頁，
   // 只查一次就會停在「尚未收到付款」不動。所以要輪詢等通知進來。
@@ -72,13 +71,14 @@
     icon.className = 'status-icon ok';
     icon.textContent = '✓';
     title.textContent = '付款完成';
-    if (token) {
-      desc.textContent = '完整報告已經解鎖了。';
-      btnReport.href = 'report.html?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token);
-      btnReport.style.display = 'block';
-    } else {
-      desc.textContent = '完整報告已解鎖，請用當初收到的報告連結開啟。';
-    }
+    desc.textContent = '完整報告已經解鎖了。';
+    btnReport.href = reportHref;
+    btnReport.style.display = 'block';
+  }
+
+  function notFound() {
+    title.textContent = '找不到這個案件';
+    desc.textContent = '請用付款後的完整連結開啟（網址要帶存取碼）。';
   }
 
   function renderAtm(d) {
@@ -103,8 +103,12 @@
   function poll() {
     tries += 1;
     fetch(lookup)
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        if (r.status === 404) return null;
+        return r.json();
+      })
       .then(function (d) {
+        if (d === null) return notFound();
         if (d.status === 'paid') return renderPaid();
         if (d.status === 'atm_pending' && d.vAccount) return renderAtm(d);
 

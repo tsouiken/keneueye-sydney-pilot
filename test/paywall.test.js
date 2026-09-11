@@ -65,15 +65,15 @@ test('結果式付費：完整報告只有付款後才拿得到', async (t) => {
   const { orderId, token } = created.json;
   assert.match(orderId, /^KC\d{17}$/);
   assert.strictEqual(typeof token, 'string');
-  assert.strictEqual(token.length, 32, 'token 應為 32 字元 hex');
+  assert.strictEqual(token.length, 48, 'token 應為 48 字元 hex（與 main 一致）');
 
   // 2. 初始狀態 open
-  const opened = await req('GET', `/api/order/${orderId}`);
+  const opened = await req('GET', `/api/order/${orderId}?token=${token}`);
   assert.strictEqual(opened.json.status, 'open');
 
   // 3. 沒帶 token 不能送問卷
   const noToken = await req('POST', '/api/delivery', { orderId, answers: {}, contact: 'line:ken' });
-  assert.strictEqual(noToken.status, 403);
+  assert.strictEqual(noToken.status, 404, '沒 token 視為不存在（防列舉）');
 
   // 4. 沒留聯絡方式不能送（付款前流程要靠它通知）
   const q = await req('GET', '/api/questionnaire');
@@ -91,7 +91,8 @@ test('結果式付費：完整報告只有付款後才拿得到', async (t) => {
   const up = await req('POST', '/api/upload-photo', { orderId, token, photo: TINY_PNG });
   assert.strictEqual(up.status, 200);
   assert.strictEqual(up.json.status, 'submitted');
-  assert.ok(up.json.photo.includes(token.slice(0, 16)), '照片檔名要帶 token，避免被猜到');
+  assert.match(up.json.photo, /^\/uploads\/photo-KC\d{17}-[0-9a-f]{16}\.(png|jpg)$/, '照片檔名要帶隨機後綴，避免被猜到');
+  assert.ok(!up.json.photo.includes(token.slice(0, 16)), '照片檔名不得洩漏 token');
 
   // 7. 報告還沒好 → 不能付款
   const tooEarly = await req('POST', '/api/order', { orderId, token });
@@ -110,10 +111,10 @@ test('結果式付費：完整報告只有付款後才拿得到', async (t) => {
 
   // 10. 查報告要 token
   const repNoToken = await req('GET', `/api/report?order=${orderId}`);
-  assert.strictEqual(repNoToken.status, 403);
+  assert.strictEqual(repNoToken.status, 404);
 
   // 11. ★ 未付款：拿得到預覽，拿不到完整報告
-  const unpaid = await req('GET', `/api/report?order=${orderId}&t=${token}`);
+  const unpaid = await req('GET', `/api/report?order=${orderId}&token=${token}`);
   assert.strictEqual(unpaid.status, 200);
   assert.strictEqual(unpaid.json.status, 'preview_ready');
   assert.strictEqual(unpaid.json.preview, '預覽段落');
@@ -125,14 +126,14 @@ test('結果式付費：完整報告只有付款後才拿得到', async (t) => {
   assert.strictEqual(pay.status, 200);
 
   // 13. ★ 付款後：完整報告解鎖
-  const paid = await req('GET', `/api/report?order=${orderId}&t=${token}`);
+  const paid = await req('GET', `/api/report?order=${orderId}&token=${token}`);
   assert.strictEqual(paid.json.status, 'paid');
   assert.strictEqual(paid.json.full, '完整報告內容');
 
   // 14. 別的案件的 token 不能拿來讀這一件
   const other = await req('POST', '/api/case', { result: 'hard' });
-  const cross = await req('GET', `/api/report?order=${orderId}&t=${other.json.token}`);
-  assert.strictEqual(cross.status, 403, '不得用別的案件的 token 讀取');
+  const cross = await req('GET', `/api/report?order=${orderId}&token=${other.json.token}`);
+  assert.strictEqual(cross.status, 404, '不得用別的案件的 token 讀取（錯 token 視為不存在）');
 });
 
 test('後台端點：沒有 ADMIN_TOKEN 一律擋掉', async (t) => {
@@ -213,17 +214,20 @@ test('跑單防護：同一個聯絡方式不能無限排隊未付款案件', as
   const other = await submit('line:someone-else');
   assert.strictEqual(other.res.status, 200);
 
-  // 前面那件付款之後，名額釋出
-  await post('/api/demo-pay', { orderId: a.caseInfo.orderId, token: a.caseInfo.token });
+  // 前面那件付款之後，名額釋出（結果式付費：要先有報告預覽才能付）
+  await post('/api/admin/report', { orderId: a.caseInfo.orderId, preview: 'p', full: 'f' }, { 'x-admin-token': ADMIN_TOKEN });
+  const payA = await post('/api/demo-pay', { orderId: a.caseInfo.orderId, token: a.caseInfo.token });
+  assert.strictEqual(payA.status, 200, '有預覽之後模擬付款要成功');
   const afterPaid = await submit('line:same-person');
   assert.strictEqual(afterPaid.res.status, 200, '已付款的案件不該再佔用名額');
 });
 
-test('舊資料遷移：結果式付費之前的訂單不能被 token 檢查鎖在門外', async (t) => {
+test('舊訂單政策：token 上線前的訂單憑訂單號存取，永遠不補 token', async (t) => {
+  // 這些客戶唯一拿過的憑證就是 success.html?order=ID。補 token 反而把他們
+  // 鎖在門外（Codex 第八輪 P1）。所以採 main 的相容規則：沒有 token 的訂單
+  // 憑訂單號即可；新訂單一律要 token。
   let B4;
   const D4 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-legacy-'));
-
-  // 用舊 schema 寫一份 orders.json：沒有 token，狀態是舊的 pending / paid
   fs.writeFileSync(path.join(D4, 'orders.json'), JSON.stringify({
     KC20260101000000001: {
       id: 'KC20260101000000001', result: 'soft', amount: 499,
@@ -240,35 +244,38 @@ test('舊資料遷移：結果式付費之前的訂單不能被 token 檢查鎖�
   B4 = await __c4.ready;
   t.after(() => { c4.kill(); fs.rmSync(D4, { recursive: true, force: true }); });
 
+  const get = (url) => fetch(B4 + url).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
   const admin = (url) => fetch(B4 + url, { headers: { 'x-admin-token': ADMIN_TOKEN } })
     .then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
 
-  // 舊的 pending 應該被對應到新流程的 open
-  const migrated = await fetch(B4 + '/api/order/KC20260101000000002').then((r) => r.json());
-  assert.strictEqual(migrated.status, 'open', '舊 pending 應遷移成 open');
+  // 舊的 pending 對應到新流程的 open；已付款的狀態不動
+  const migrated = await get('/api/order/KC20260101000000002');
+  assert.strictEqual(migrated.status, 200, '舊訂單不需 token 即可查詢');
+  assert.strictEqual(migrated.json.status, 'open', '舊 pending 應對應成 open');
+  const paidLegacy = await get('/api/order/KC20260101000000001');
+  assert.strictEqual(paidLegacy.json.status, 'paid', '舊的已付款訂單不該被改狀態');
 
-  // 已付款的舊訂單狀態不該被動到
-  const paidLegacy = await fetch(B4 + '/api/order/KC20260101000000001').then((r) => r.json());
-  assert.strictEqual(paidLegacy.status, 'paid', '舊的已付款訂單不該被改狀態');
+  // 不補 token：磁碟上仍然沒有
+  const onDisk = JSON.parse(fs.readFileSync(path.join(D4, 'orders.json'), 'utf8'));
+  assert.strictEqual(onDisk.KC20260101000000001.token, undefined, '舊訂單不得被補上 token');
+  assert.strictEqual(onDisk.KC20260101000000002.status, 'open', '狀態對應要落地');
 
-  // 兩筆都要補到 token —— 從後台明細拿得到，且不是 undefined
+  // 後台的報告連結：只有訂單號，沒有 token=、更沒有 undefined
   const detail = await admin('/api/admin/case/KC20260101000000001');
   assert.strictEqual(detail.status, 200);
-  assert.ok(!detail.json.reportUrl.includes('t=undefined'), '報告連結不得是 t=undefined');
-  const tok = new URL('http://x' + detail.json.reportUrl).searchParams.get('t');
-  assert.strictEqual(typeof tok, 'string');
-  assert.strictEqual(tok.length, 32, '遷移補的 token 應為 32 字元');
+  assert.strictEqual(detail.json.legacy, true);
+  assert.ok(!detail.json.reportUrl.includes('undefined'), '報告連結不得出現 undefined');
+  assert.ok(!detail.json.reportUrl.includes('token='), '舊訂單的報告連結不帶 token');
 
-  // 拿補好的 token 應該真的讀得到報告（已付款客戶不能被鎖在門外）
-  const rep = await fetch(`${B4}/api/report?order=KC20260101000000001&t=${tok}`)
-    .then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
-  assert.strictEqual(rep.status, 200, '已付款的舊客戶必須讀得到自己的報告');
+  // 憑訂單號就讀得到（這正是他們手上那個網址）；帶錯 token 也放行——訂單沒有 token 可比
+  const rep = await get('/api/report?order=KC20260101000000001');
+  assert.strictEqual(rep.status, 200, '已付款的舊客戶必須憑訂單號讀得到');
   assert.strictEqual(rep.json.status, 'paid');
 
-  // 遷移結果要落地，不能只存在記憶體
-  const onDisk = JSON.parse(fs.readFileSync(path.join(D4, 'orders.json'), 'utf8'));
-  assert.strictEqual(onDisk.KC20260101000000001.token, tok, '補的 token 要寫回檔案');
-  assert.strictEqual(onDisk.KC20260101000000002.status, 'open');
+  // 對照：新案件沒 token 就是 404
+  const made = await fetch(B4 + '/api/case', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json());
+  assert.strictEqual((await get('/api/report?order=' + made.orderId)).status, 404, '新案件沒 token 視為不存在');
+  assert.strictEqual((await get('/api/report?order=' + made.orderId + '&token=' + made.token)).status, 200);
 });
 
 test('真實金流：綠界導回的網址要帶 token，否則付完錢打不開報告', async (t) => {
@@ -298,7 +305,7 @@ test('真實金流：綠界導回的網址要帶 token，否則付完錢打不�
   assert.strictEqual(order.status, 200);
   const backUrl = order.json.formFields.ClientBackURL;
   assert.ok(backUrl.includes('order=' + c.json.orderId), '導回網址要帶案件編號');
-  assert.ok(backUrl.includes('t=' + c.json.token), '導回網址要帶 token，不然付完錢開不了報告');
+  assert.ok(backUrl.includes('token=' + c.json.token), '導回網址要帶 token，不然付完錢開不了報告');
 });
 
 test('舊的已付款案件還沒有報告時，不能當成已交付', async (t) => {
@@ -327,8 +334,8 @@ test('舊的已付款案件還沒有報告時，不能當成已交付', async (t
 
   // 報告端點不該假裝已交付
   const d = await admin('/api/admin/case/KC20260101000000009');
-  const tok = new URL('http://x' + d.json.reportUrl).searchParams.get('t');
-  const rep = await fetch(`${B6}/api/report?order=KC20260101000000009&t=${tok}`).then((r) => r.json());
+  assert.strictEqual(d.json.legacy, true);
+  const rep = await fetch(`${B6}/api/report?order=KC20260101000000009`).then((r) => r.json());
   assert.strictEqual(rep.status, 'paid');
   assert.strictEqual(rep.full, null, '沒寫報告就不該有 full 內容');
   assert.strictEqual(rep.previewReady, false);
@@ -387,14 +394,14 @@ test('付款重試：每次嘗試的綠界交易編號要不同，且回傳仍�
   }).then((r) => r.text());
   assert.strictEqual(cbRes, '1|OK', '綠界回傳應被接受');
 
-  const after = await fetch(`${B7}/api/order/${c.json.orderId}`).then((r) => r.json());
+  const after = await fetch(`${B7}/api/order/${c.json.orderId}?token=${c.json.token}`).then((r) => r.json());
   assert.strictEqual(after.status, 'paid', '第二次嘗試的回傳要能把案件標成已付款');
 });
 
 test('LINE 設定好時，送出問卷不能因為通知失敗而 500', async (t) => {
   let B8;
   const D8 = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-line-'));
-  const __c8 = startServer({ DATA_DIR: D8, ADMIN_TOKEN, LINE_ACCESS_TOKEN: 'dummy-token', LINE_OWNER_ID: 'U0000000000000000000000000000000' });
+  const __c8 = startServer({ DATA_DIR: D8, ADMIN_TOKEN, LINE_CHANNEL_ACCESS_TOKEN: 'dummy-token', KEN_LINE_USER_ID: 'U0000000000000000000000000000000' });
   const c8 = __c8.child;
   B8 = await __c8.ready;
   t.after(() => { c8.kill(); fs.rmSync(D8, { recursive: true, force: true }); });
@@ -591,13 +598,13 @@ test('付款重試：晚到的 ATM 通知不能把已付款的案件重新鎖起
 
   // B 次成功入帳
   await callback({ MerchantTradeNo: refB, TradeNo: 'TN-B', PaymentDate: '2026/08/30 12:00:00' });
-  let rep = await fetch(BC + `/api/report?order=${orderId}&t=${token}`).then((r) => r.json());
+  let rep = await fetch(BC + `/api/report?order=${orderId}&token=${token}`).then((r) => r.json());
   assert.strictEqual(rep.status, 'paid');
   assert.strictEqual(rep.full, '完整報告內容');
 
   // A 次的虛擬帳號通知才姍姍來遲
   await callback({ MerchantTradeNo: refA, vAccount: '9998887776', BankCode: '822', ExpireDate: '2026/09/05' });
-  rep = await fetch(BC + `/api/report?order=${orderId}&t=${token}`).then((r) => r.json());
+  rep = await fetch(BC + `/api/report?order=${orderId}&token=${token}`).then((r) => r.json());
   assert.strictEqual(rep.status, 'paid', '已付款不能被舊回傳打回 atm_pending');
   assert.strictEqual(rep.full, '完整報告內容', '完整報告不能被重新鎖起來');
 });
@@ -627,9 +634,9 @@ test('舊流程先付款、後補資料的案件，補得進來也拿得到報�
   }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
 
   const orderId = 'KC19990101000000001';
+  const token = ''; // 舊訂單沒有 token，憑訂單號就能補資料
   const migrated = JSON.parse(fs.readFileSync(path.join(DD, 'orders.json'), 'utf8'));
-  const token = migrated[orderId].token;
-  assert.ok(token, '遷移要補上 token');
+  assert.strictEqual(migrated[orderId].token, undefined, '舊訂單不得被補上 token');
   assert.strictEqual(migrated[orderId].status, 'paid', 'paid 不能被遷移改掉');
 
   const qs = await fetch(BD + '/api/questionnaire').then((r) => r.json());
@@ -653,7 +660,7 @@ test('舊流程先付款、後補資料的案件，補得進來也拿得到報�
     method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_TOKEN },
     body: JSON.stringify({ orderId, preview: '預覽', full: '舊案件的完整報告' })
   });
-  const rep = await fetch(BD + `/api/report?order=${orderId}&t=${token}`).then((r) => r.json());
+  const rep = await fetch(BD + `/api/report?order=${orderId}&token=${token}`).then((r) => r.json());
   assert.strictEqual(rep.status, 'paid');
   assert.strictEqual(rep.full, '舊案件的完整報告');
 });
@@ -697,13 +704,13 @@ test('交報告不能把 ATM 待付款打回 preview_ready（虛擬帳號還付�
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(params).toString()
   });
-  let rep = await fetch(BE + `/api/report?order=${orderId}&t=${token}`).then((r) => r.json());
+  let rep = await fetch(BE + `/api/report?order=${orderId}&token=${token}`).then((r) => r.json());
   assert.strictEqual(rep.status, 'atm_pending');
   assert.strictEqual(rep.vAccount, '9998887776');
 
   // 這時我回頭修報告內容
   await saveReport(orderId, '修正版');
-  rep = await fetch(BE + `/api/report?order=${orderId}&t=${token}`).then((r) => r.json());
+  rep = await fetch(BE + `/api/report?order=${orderId}&token=${token}`).then((r) => r.json());
   assert.strictEqual(rep.status, 'atm_pending', '改報告不能把 ATM 待付款狀態洗掉');
   assert.strictEqual(rep.vAccount, '9998887776', '虛擬帳號要留著，那筆錢還付得進去');
   assert.strictEqual(rep.bankCode, '822');
@@ -718,7 +725,7 @@ test('交報告不能把 ATM 待付款打回 preview_ready（虛擬帳號還付�
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(paidParams).toString()
   });
-  rep = await fetch(BE + `/api/report?order=${orderId}&t=${token}`).then((r) => r.json());
+  rep = await fetch(BE + `/api/report?order=${orderId}&token=${token}`).then((r) => r.json());
   assert.strictEqual(rep.status, 'paid');
   assert.strictEqual(rep.full, '修正版');
 });
@@ -863,7 +870,7 @@ test('未付款照片配額：要把正在傳的這一張也算進去，且已�
   // 已付款案件不受這個配額限制（它的照片不算在未付款總量裡）
   const paidId = 'KC19990101000000002';
   const onDisk = JSON.parse(fs.readFileSync(path.join(DH, 'orders.json'), 'utf8'));
-  onDisk[paidId] = { id: paidId, status: 'paid', amount: 499, result: 'soft', token: 'f'.repeat(32) };
+  onDisk[paidId] = { id: paidId, status: 'paid', amount: 499, result: 'soft', token: 'f'.repeat(48) };
   fs.writeFileSync(path.join(DH, 'orders.json'), JSON.stringify(onDisk));
   __ch.child.kill();
   const __ch2 = startServer({ DATA_DIR: DH, ADMIN_TOKEN, MAX_UNPAID_PHOTO_BYTES: String(300 * 1024) });
@@ -871,7 +878,7 @@ test('未付款照片配額：要把正在傳的這一張也算進去，且已�
   t.after(() => { __ch2.child.kill(); });
   const paidUp = await fetch(BH2 + '/api/upload-photo', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ orderId: paidId, token: 'f'.repeat(32), photo: photo(200 * 1024, 3) })
+    body: JSON.stringify({ orderId: paidId, token: 'f'.repeat(48), photo: photo(200 * 1024, 3) })
   }).then(async (r) => ({ status: r.status }));
   assert.strictEqual(paidUp.status, 200, '已付款案件不該被未付款配額擋住');
 });

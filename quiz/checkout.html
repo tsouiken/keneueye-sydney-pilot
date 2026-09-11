@@ -31,7 +31,7 @@
   </div>
 
   <button id="btn-pay" class="btn btn-gold">前往付款</button>
-  <p class="fineprint">付款完成後，我們會透過 LINE 聯絡你完成後續步驟。<br>測驗與報告僅供參考，不構成任何保證。</p>
+  <p class="fineprint">付款完成後，我們會透過 LINE 聯絡你完成後續步驟。<br>測驗與報告僅供個人參考，請依自己的實際情況判斷。</p>
 
   <div id="demo-box" style="display:none; margin-top:24px;">
     <div class="result-note" style="margin-bottom:12px">
@@ -50,7 +50,7 @@
   var params = new URLSearchParams(location.search);
   var dim = params.get('r') || '';
   var orderId = params.get('order') || '';
-  var token = params.get('t') || '';
+  var token = params.get('token') || '';
 
   var recap = document.getElementById('recap');
   if (!orderId || !token) {
@@ -63,6 +63,16 @@
     var strong = document.createElement('strong');
     strong.textContent = orderId;
     recap.appendChild(strong);
+    // 從董事會來的：把角色帶進來當 recap（只用角色名，不用其他名稱）
+    var boardResult = null;
+    try { boardResult = JSON.parse(localStorage.getItem('zw_result')); } catch (_) {}
+    if (boardResult && boardResult.top && boardResult.top.length) {
+      var br = document.createElement('div');
+      br.style.marginTop = '8px';
+      br.textContent = '你的董事會核心：' + boardResult.top.map(function (s) { return s.role; }).join('、') +
+        '。解鎖後會針對你的眉眼結構做完整校準分析。';
+      recap.appendChild(br);
+    }
   }
 
   var btnPay = document.getElementById('btn-pay');
@@ -84,7 +94,7 @@
         // 直接帶回付款頁看帳號，兩組都入帳就是收了兩次錢。
         if (data.status === 'atm_pending' && data.vAccount) {
           location.href = 'success.html?order=' + encodeURIComponent(orderId) +
-            '&t=' + encodeURIComponent(token);
+            '&token=' + encodeURIComponent(token);
           return;
         }
         if (data.error) throw new Error(data.error);
@@ -122,7 +132,7 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.ok) {
-          location.href = 'success.html?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token);
+          location.href = 'success.html?order=' + encodeURIComponent(orderId) + '&token=' + encodeURIComponent(token);
         } else {
           alert('模擬付款失敗：' + (data.error || '未知錯誤'));
           btnDemo.disabled = false;

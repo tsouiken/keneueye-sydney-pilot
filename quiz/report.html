@@ -61,7 +61,7 @@
     </div>
   </div>
 
-  <p class="fineprint">測驗與報告僅供參考，不構成任何保證。</p>
+  <p class="fineprint">測驗與報告僅供個人參考，請依自己的實際情況判斷。</p>
 
 </div>
 
@@ -70,7 +70,7 @@
   'use strict';
   var params = new URLSearchParams(location.search);
   var orderId = params.get('order') || '';
-  var token = params.get('t') || '';
+  var token = params.get('token') || '';
 
   function show(id) {
     ['loading', 'pending', 'preview-area', 'full-area', 'error-area'].forEach(function (k) {
@@ -101,15 +101,16 @@
     show('error-area');
   }
 
-  if (!orderId || !token) {
-    fail('網址不完整', '這一頁需要案件編號與存取碼，請用當初收到的完整連結開啟。');
+  // 只有案件編號是必填：token 上線前的舊訂單沒有 token，憑訂單號就開得了；
+  // 新訂單沒帶 token 會是 404，訊息會請對方用完整連結。
+  if (!orderId) {
+    fail('網址不完整', '這一頁需要案件編號，請用當初收到的完整連結開啟。');
     return;
   }
 
-  fetch('/api/report?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token))
+  fetch('/api/report?order=' + encodeURIComponent(orderId) + '&token=' + encodeURIComponent(token))
     .then(function (r) {
-      if (r.status === 403) throw new Error('存取碼不正確');
-      if (r.status === 404) throw new Error('找不到這個案件');
+      if (r.status === 404) throw new Error('找不到這個案件，或存取碼不正確。請用當初收到的完整連結開啟。');
       return r.json();
     })
     .then(function (d) {
@@ -131,7 +132,7 @@
       if (d.previewReady) {
         renderText(document.getElementById('preview-text'), d.preview);
         document.getElementById('btn-unlock').href =
-          'checkout.html?order=' + encodeURIComponent(orderId) + '&t=' + encodeURIComponent(token);
+          'checkout.html?order=' + encodeURIComponent(orderId) + '&token=' + encodeURIComponent(token);
         show('preview-area');
         return;
       }
