@@ -13,27 +13,33 @@
 
 ```
 Webhook → Router（依 event 分流）
-           ├─ order.paid       → LINE 通知你 ＋ Google Sheets 新增一列
-           ├─ order.created    → Google Sheets 新增一列（潛在名單）
-           └─ order.atm_pending→ LINE 通知你（ATM 帳號已開，等轉帳）
+           ├─ order.paid              → LINE 通知你 ＋ Google Sheets 新增一列
+           ├─ order.created           → Google Sheets 新增一列（潛在名單）
+           ├─ order.atm_pending       → LINE 通知你（ATM 帳號已開，等轉帳）
+           ├─ order.duplicate_payment → LINE 通知你（同一份報告收到第二筆錢，要退款）
+           ├─ case.submitted          → （選用）提醒你有案件等著寫報告
+           └─ case.preview_ready      → （選用）提醒對方預覽好了
 ```
 
 ## 3. Webhook 收到的資料（payload）
 
 | 欄位 | 說明 |
 |:--|:--|
-| `event` | `order.created` / `order.paid` / `order.atm_pending` |
-
-> `order.created` 的**時機**在結果式付費之後變了：現在是對方**送出免費問卷並留下聯絡方式**時就發，不再是進到結帳時。事件名稱維持不變，既有的 router 不用動；payload 多了 `contact`。
->
-> 刻意不在建立案件（開啟 `submit.html`）時就發——那會把「開了頁面又關掉」也記成一筆名單。
+| `event` | `order.created` / `order.paid` / `order.atm_pending` / `order.duplicate_payment` / `case.submitted` / `case.preview_ready` |
 | `orderId` | 訂單編號（如 `KC20260820225801137`） |
 | `amount` | 金額（499） |
-| `result` | 測驗維度（soft / hard / tired / fierce / scattered） |
+| `result` | 案件來源標記（董事會：「董事會：角色、角色」；舊的 5 維測驗是 soft / hard / tired / fierce / scattered） |
+| `board` | 董事會資料 `{ top: [{key, role}], bars: {B1..B4} }`；沒玩遊戲就是 `null` |
+| `contact` | 對方留的聯絡方式（`order.created` / `case.*`） |
+| `paidTradeNo` | `order.duplicate_payment` 專用：真正入帳的那筆；`tradeNo` 是多收的那筆 |
 | `method` | 付款方式（Credit / ATM / DEMO） |
 | `tradeNo` | 綠界交易序號 |
 | `bankCode` / `vAccount` / `expireDate` | ATM 虛擬帳號資料（僅 atm_pending） |
 | `sentAt` | 事件時間（ISO） |
+
+> `order.created` 的**時機**在結果式付費之後變了：現在是對方**送出免費問卷並留下聯絡方式**時就發，不再是進到結帳時。事件名稱維持不變，既有的 router 不用動；payload 多了 `contact`。
+>
+> 刻意不在建立案件（開啟 `submit.html`）時就發——那會把「開了頁面又關掉」也記成一筆名單。
 
 ## 4. LINE 通知範例
 
