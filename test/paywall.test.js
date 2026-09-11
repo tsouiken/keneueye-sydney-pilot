@@ -834,3 +834,44 @@ test('潛在名單事件在留下聯絡方式時才發，不是一開頁面就�
   await new Promise((r) => setTimeout(r, 300));
   assert.strictEqual(hits.filter((h) => h.event === 'order.created').length, 1, '重送不該重複記一筆');
 });
+
+test('未付款照片配額：要把正在傳的這一張也算進去，且已付款案件不受限', async (t) => {
+  // 上限設 300KB，一張 200KB 的照片：第一張進得去，第二張會讓總量
+  // 超過上限，所以要擋。只看「已經存好的檔案」的話第二張會過。
+  const DH = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-quota-'));
+  const __ch = startServer({ DATA_DIR: DH, ADMIN_TOKEN, MAX_UNPAID_PHOTO_BYTES: String(300 * 1024) });
+  const BH = await __ch.ready;
+  t.after(() => { __ch.child.kill(); fs.rmSync(DH, { recursive: true, force: true }); });
+
+  const post = (url, body) => fetch(BH + url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+  const photo = (bytes, fill) => 'data:image/jpeg;base64,' + Buffer.alloc(bytes, fill).toString('base64');
+
+  const a = await post('/api/case', { result: 'soft' });
+  const first = await post('/api/upload-photo', {
+    orderId: a.json.orderId, token: a.json.token, photo: photo(200 * 1024, 1)
+  });
+  assert.strictEqual(first.status, 200, '第一張在上限內');
+
+  const b = await post('/api/case', { result: 'soft' });
+  const second = await post('/api/upload-photo', {
+    orderId: b.json.orderId, token: b.json.token, photo: photo(200 * 1024, 2)
+  });
+  assert.strictEqual(second.status, 507, '加上這一張會超過上限，要擋下來');
+
+  // 已付款案件不受這個配額限制（它的照片不算在未付款總量裡）
+  const paidId = 'KC19990101000000002';
+  const onDisk = JSON.parse(fs.readFileSync(path.join(DH, 'orders.json'), 'utf8'));
+  onDisk[paidId] = { id: paidId, status: 'paid', amount: 499, result: 'soft', token: 'f'.repeat(32) };
+  fs.writeFileSync(path.join(DH, 'orders.json'), JSON.stringify(onDisk));
+  __ch.child.kill();
+  const __ch2 = startServer({ DATA_DIR: DH, ADMIN_TOKEN, MAX_UNPAID_PHOTO_BYTES: String(300 * 1024) });
+  const BH2 = await __ch2.ready;
+  t.after(() => { __ch2.child.kill(); });
+  const paidUp = await fetch(BH2 + '/api/upload-photo', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orderId: paidId, token: 'f'.repeat(32), photo: photo(200 * 1024, 3) })
+  }).then(async (r) => ({ status: r.status }));
+  assert.strictEqual(paidUp.status, 200, '已付款案件不該被未付款配額擋住');
+});

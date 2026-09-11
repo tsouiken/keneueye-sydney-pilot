@@ -398,14 +398,21 @@ function rateLimited(key, limit, windowMs) {
   return false;
 }
 
+// 單一案件照片檔的大小（檔案不在就當 0）
+function photoBytes(order) {
+  try {
+    return fs.statSync(path.join(DATA_DIR, String(order.photo).replace(/^\/+/, ''))).size;
+  } catch (_) {
+    return 0;
+  }
+}
+
 // 未付款案件目前佔用的照片位元組數。檔案不多，直接量最誠實。
 function unpaidPhotoBytes() {
   let total = 0;
   for (const o of Object.values(orders)) {
     if (o.status === 'paid' || !o.photo) continue;
-    try {
-      total += fs.statSync(path.join(DATA_DIR, o.photo.replace(/^\/+/, ''))).size;
-    } catch (_) { /* 檔案不在就當 0 */ }
+    total += photoBytes(o);
   }
   return total;
 }
@@ -497,11 +504,6 @@ const server = http.createServer(async (req, res) => {
       if (!tokenOk(order, body.token)) return sendJson(res, 403, { ok: false, error: '存取碼不正確' });
       // 擋的是「換掉報告所依據的照片」。還沒有照片的舊 paid 案件要補得上來，
       // 否則付過錢的人既補不了資料也拿不到報告。實際比對放在拿到 buffer 之後。
-      // 配額是給未付款案件用的。已付款案件的照片根本不算在 unpaidPhotoBytes()
-      // 裡面，卻被擋下來的話，付過錢的人就補不完資料也拿不到報告。
-      if (order.status !== 'paid' && unpaidPhotoBytes() >= MAX_UNPAID_PHOTO_BYTES) {
-        return sendJson(res, 507, { ok: false, error: '目前排隊的案件太多，請晚點再送。' });
-      }
       const data = body.photo; // data URL 或 base64
       if (typeof data !== 'string' || data.length < 100) return sendJson(res, 400, { ok: false, error: '照片資料無效' });
       const m = data.match(/^data:(image\/\w+);base64,(.+)$/);
@@ -518,6 +520,17 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, 200, { ok: true, photo: order.photo, orderId: order.id, status: order.status, repeat: true });
         }
         return sendJson(res, 409, { ok: false, error: '這個案件已經送出了，不能再更換照片。' });
+      }
+      // 配額是給未付款案件用的：已付款案件的照片不算在 unpaidPhotoBytes() 裡，
+      // 擋掉它只會讓付過錢的人補不完資料。
+      // 而且要把「這一張」也算進去——只看已經存好的檔案，等於每次都能再超收
+      // 一張照片的量（上限設小的時候差很多）。同一件重傳時要扣掉舊檔，
+      // 否則自己會被自己的舊照片算兩次。
+      if (order.status !== 'paid') {
+        const existing = order.photo ? photoBytes(order) : 0;
+        if (unpaidPhotoBytes() - existing + buf.length > MAX_UNPAID_PHOTO_BYTES) {
+          return sendJson(res, 507, { ok: false, error: '目前排隊的案件太多，請晚點再送。' });
+        }
       }
       const ext = m[1] === 'image/png' ? 'png' : 'jpg';
       // 檔名帶 token：/uploads/* 是公開靜態路徑，未付款者的照片也會存在這裡，
