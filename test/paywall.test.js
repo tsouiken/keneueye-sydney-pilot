@@ -214,7 +214,10 @@ test('跑單防護：同一個聯絡方式不能無限排隊未付款案件', as
   const other = await submit('line:someone-else');
   assert.strictEqual(other.res.status, 200);
 
-  // 前面那件付款之後，名額釋出（結果式付費：要先有報告預覽才能付）
+  // 前面那件付款之後，名額釋出（結果式付費：資料收齊 → 有報告預覽 → 才能付）
+  const noPhotoYet = await post('/api/admin/report', { orderId: a.caseInfo.orderId, preview: 'p', full: 'f' }, { 'x-admin-token': ADMIN_TOKEN });
+  assert.strictEqual(noPhotoYet.status, 409, '照片還沒收齊不能交報告');
+  await post('/api/upload-photo', { orderId: a.caseInfo.orderId, token: a.caseInfo.token, photo: TINY_PNG });
   await post('/api/admin/report', { orderId: a.caseInfo.orderId, preview: 'p', full: 'f' }, { 'x-admin-token': ADMIN_TOKEN });
   const payA = await post('/api/demo-pay', { orderId: a.caseInfo.orderId, token: a.caseInfo.token });
   assert.strictEqual(payA.status, 200, '有預覽之後模擬付款要成功');
@@ -297,6 +300,12 @@ test('真實金流：綠界導回的網址要帶 token，否則付完錢打不�
   assert.strictEqual(health.demo, false, '有憑證就不該是模擬模式');
 
   const c = await post('/api/case', { result: 'soft' });
+  // 交報告前資料要收齊（伺服器端會擋），否則後面拿不到結帳表單
+  const qs13 = await fetch(B5 + '/api/questionnaire').then((r) => r.json());
+  const ans13 = {};
+  qs13.questions.forEach((x) => { ans13[x.id] = x.options[0]; });
+  await post('/api/delivery', { orderId: c.json.orderId, token: c.json.token, answers: ans13, contact: 'line:ken' });
+  await post('/api/upload-photo', { orderId: c.json.orderId, token: c.json.token, photo: TINY_PNG });
   await post('/api/admin/report',
     { orderId: c.json.orderId, preview: 'p', full: 'f' },
     { 'x-admin-token': ADMIN_TOKEN });
@@ -369,6 +378,11 @@ test('付款重試：每次嘗試的綠界交易編號要不同，且回傳仍�
   }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
 
   const c = await post('/api/case', { result: 'soft' });
+  const qs15 = await fetch(B7 + '/api/questionnaire').then((r) => r.json());
+  const ans15 = {};
+  qs15.questions.forEach((x) => { ans15[x.id] = x.options[0]; });
+  await post('/api/delivery', { orderId: c.json.orderId, token: c.json.token, answers: ans15, contact: 'line:ken' });
+  await post('/api/upload-photo', { orderId: c.json.orderId, token: c.json.token, photo: TINY_PNG });
   await post('/api/admin/report', { orderId: c.json.orderId, preview: 'p', full: 'f' },
     { 'x-admin-token': ADMIN_TOKEN });
 
@@ -1012,4 +1026,67 @@ test('ATM：被取代的舊嘗試晚到的取號通知，不能蓋掉現行那�
   const rep = await fetch(BJ + `/api/report?order=${orderId}&token=${token}`).then((r) => r.json());
   assert.strictEqual(rep.status, 'atm_pending');
   assert.strictEqual(rep.vAccount, '2222222222', '現行那筆的帳號不能被舊嘗試晚到的通知蓋掉');
+});
+
+test('部署前就付款的訂單：綠界重送原本那筆成功回傳，不能被記成重複付款', async (t) => {
+  // 舊回傳只存 status／tradeNo，沒有 paidRef；舊流程的 MerchantTradeNo 就是訂單號。
+  const ecpayLib = require(path.join(__dirname, '..', 'lib', 'ecpay'));
+  const MID = '2000132', KEY = '5294y06JbISpM5x9', IV = 'v77hoKGq4kWxNIMEHK';
+  const hits = [];
+  const hook = require('node:http').createServer((rq, rs) => {
+    let b = '';
+    rq.on('data', (c) => { b += c; });
+    rq.on('end', () => { try { hits.push(JSON.parse(b)); } catch (_) {} rs.writeHead(200); rs.end('ok'); });
+  });
+  await new Promise((r) => hook.listen(0, '127.0.0.1', r));
+  const hookUrl = `http://127.0.0.1:${hook.address().port}/`;
+  const LEG = 'KC20260201000000555';
+  const DK = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-legacy-retry-'));
+  fs.writeFileSync(path.join(DK, 'orders.json'), JSON.stringify({
+    [LEG]: { id: LEG, result: '舊單', amount: 499, status: 'paid', tradeNo: 'TN-OLD', paidAt: '2026-02-01T00:00:00.000Z',
+             answers: { q1: 'a' }, photo: '/uploads/x.png', full: '舊報告', createdAt: '2026-02-01T00:00:00.000Z' }
+  }));
+  const __ck = startServer({ DATA_DIR: DK, ADMIN_TOKEN, MAKE_WEBHOOK_URL: hookUrl, ECPAY_MERCHANT_ID: MID, ECPAY_HASH_KEY: KEY, ECPAY_HASH_IV: IV });
+  const BK = await __ck.ready;
+  t.after(() => { __ck.child.kill(); hook.close(); fs.rmSync(DK, { recursive: true, force: true }); });
+  const callback = (fields) => {
+    const params = { MerchantID: MID, TotalAmount: '499', RtnCode: '1', ...fields };
+    params.CheckMacValue = ecpayLib.checkMacValue(params, KEY, IV, 'sha256');
+    return fetch(BK + '/api/pay-callback', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(params).toString()
+    }).then((r) => r.text());
+  };
+  // 綠界重送原本那筆：MerchantTradeNo 是訂單號、TradeNo 是同一筆
+  assert.strictEqual(await callback({ MerchantTradeNo: LEG, TradeNo: 'TN-OLD', PaymentDate: '2026/02/01 10:00:00' }), '1|OK');
+  await new Promise((r) => setTimeout(r, 300));
+  const onDisk = JSON.parse(fs.readFileSync(path.join(DK, 'orders.json'), 'utf8'))[LEG];
+  assert.strictEqual((onDisk.duplicatePayments || []).length, 0, '原本那筆不是重複付款');
+  assert.strictEqual(onDisk.paidRef, LEG, '命中就把 paidRef 補起來');
+  assert.strictEqual(onDisk.tradeNo, 'TN-OLD');
+  assert.strictEqual(hits.filter((h) => h.event === 'order.duplicate_payment').length, 0, '不得發退款警報');
+  assert.strictEqual(hits.filter((h) => h.event === 'order.paid').length, 0, '也不重發成單通知');
+  // 真正另一筆（不同 TradeNo、不同 ref）才算重複
+  assert.strictEqual(await callback({ MerchantTradeNo: 'KP20260911000000ZZZZ', TradeNo: 'TN-NEW', PaymentDate: '2026/09/11 10:00:00' }), '0|訂單不存在', '查不到的 ref 不會亂配對');
+});
+
+test('open 案件換照片：舊檔要刪掉，磁碟上只留最後一張', async (t) => {
+  const DL = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-photo-replace-'));
+  const __cl = startServer({ DATA_DIR: DL, ADMIN_TOKEN });
+  const BL = await __cl.ready;
+  t.after(() => { __cl.child.kill(); fs.rmSync(DL, { recursive: true, force: true }); });
+  const post = (url, body) => fetch(BL + url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+  const photo = (fill) => 'data:image/jpeg;base64,' + Buffer.alloc(4096, fill).toString('base64');
+  const c = await post('/api/case', { result: 'soft' });
+  const { orderId, token } = c.json;
+  for (const f of [1, 2, 3]) {
+    const r = await post('/api/upload-photo', { orderId, token, photo: photo(f) });
+    assert.strictEqual(r.status, 200);
+  }
+  const files = fs.readdirSync(path.join(DL, 'uploads')).filter((n) => n.includes(orderId));
+  assert.strictEqual(files.length, 1, '被換掉的照片不能留在磁碟上');
+  const rep = await fetch(BL + `/api/report?order=${orderId}&token=${token}`).then((r) => r.json());
+  assert.strictEqual('/uploads/' + files[0], rep.photo, '留下的就是指標指到的那張');
 });

@@ -555,6 +555,15 @@ const server = http.createServer(async (req, res) => {
       // 檔名必須猜不到，否則靠訂單號就能翻到別人的臉。
       const fname = `photo-${order.id}-${crypto.randomBytes(8).toString('hex')}.${ext}`;
       fs.writeFileSync(path.join(UPLOAD_DIR, fname), buf);
+      // open 案件可以換照片：舊檔要刪，不然 unpaidPhotoBytes() 只算指標指到的那個，
+      // 被換掉的檔會留在磁碟上、又不在配額裡，等於可以無限灌。
+      // 只刪 UPLOAD_DIR 底下、且不是剛寫的那個檔。
+      if (order.photo && order.photo !== '/uploads/' + fname) {
+        const oldFile = path.resolve(UPLOAD_DIR, String(order.photo).replace(/^\/uploads\//, ''));
+        if (oldFile.startsWith(UPLOAD_DIR + path.sep)) {
+          try { fs.unlinkSync(oldFile); } catch (_) { /* 已不在就算了 */ }
+        }
+      }
       order.photo = '/uploads/' + fname;
       order.photoSubmittedAt = new Date().toISOString();
       markSubmittedIfComplete(order);
@@ -666,6 +675,12 @@ const server = http.createServer(async (req, res) => {
       const preview = String(body.preview || '').trim();
       const full = String(body.full || '').trim();
       if (!preview || !full) return sendJson(res, 400, { ok: false, error: 'preview 與 full 都必填' });
+      // 資料沒收齊不能交報告：佇列裡有 open 案件，對它交了報告會直接變 preview_ready，
+      // 之後補進來的作答／照片不會讓報告失效——那份報告是在沒有資料的情況下寫的。
+      // 只看資料不看狀態，所以舊流程先付款的案件補齊之後照樣能交。
+      if (!order.answers || !order.photo) {
+        return sendJson(res, 409, { ok: false, error: '問卷與照片還沒收齊，還不能交報告', status: order.status });
+      }
       order.preview = preview;
       order.full = full;
       // paid 不能降級；atm_pending 也不行——虛擬帳號還付得進去，
@@ -782,8 +797,15 @@ const server = http.createServer(async (req, res) => {
           // 已經付過了又來一筆成功：伺服器擋不住（綠界先扣款才通知），
           // 能做的是不覆蓋、不重發通知、記下來讓 Ken 退款。同一個 ref 重送＝綠界重試，no-op。
           order.duplicatePayments = order.duplicatePayments || [];
+          // 「同一筆」的判斷要涵蓋部署前就付款的訂單：那時的回傳只存 status/tradeNo，
+          // 沒有 paidRef，而舊流程的 MerchantTradeNo 就是訂單號。綠界重送那筆成功回傳
+          // 時，不能因為 paidRef 是空的就記成重複付款、發退款警報。命中就把 paidRef 補上。
+          const isOriginal = ref === order.paidRef ||
+            (order.tradeNo && params.TradeNo && params.TradeNo === order.tradeNo) ||
+            (!order.paidRef && ref === order.id);
+          if (isOriginal && !order.paidRef) { order.paidRef = ref; saveOrders(); }
           const seen = order.duplicatePayments.some((d) => d.ref === ref);
-          if (ref !== order.paidRef && !seen) {
+          if (!isOriginal && !seen) {
             order.duplicatePayments.push({
               ref, tradeNo: params.TradeNo || '', paymentDate: params.PaymentDate || '',
               amount: Number(params.TotalAmount) || 0, receivedAt: new Date().toISOString()
