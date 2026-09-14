@@ -160,12 +160,10 @@ function tradeNoTaken(no) {
   });
 }
 
-// 繳費期限那天結束前都算還付得進去。讀不出期限就當作仍有效——
+// 期限判斷放在 lib/ecpay.js（那裡才測得到注入時間）。讀不出期限就當作仍有效——
 // 寧可擋住重複建立，也不要開出第二組會被重複入帳的帳號。
 function atmExpired(order) {
-  const m = String(order.expireDate || '').match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
-  if (!m) return false;
-  return Date.now() > new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59).getTime();
+  return ecpay.atmExpired(order.expireDate);
 }
 
 function newPaymentRef() {
@@ -720,6 +718,24 @@ const server = http.createServer(async (req, res) => {
 
       if (DEMO) {
         return sendJson(res, 200, { demo: true, orderId: order.id });
+      }
+
+      // 走到這裡，若原本是 atm_pending 就表示那組帳號已經過期（沒過期的在上面被擋掉了）。
+      // 舊的 vAccount／expireDate 留著會害死人：success.html 看到 atm_pending ＋ 有帳號，
+      // 就會把那組已經收不了錢的帳號當成「請轉這裡」印出來。所以先歸檔再清乾淨，
+      // 狀態退回 preview_ready，等新的回傳進來再重設。
+      if (order.status === 'atm_pending') {
+        order.expiredAtms = order.expiredAtms || [];
+        order.expiredAtms.push({
+          bankCode: order.bankCode || '',
+          vAccount: order.vAccount || '',
+          expireDate: order.expireDate || '',
+          supersededAt: new Date().toISOString()
+        });
+        order.status = 'preview_ready';
+        delete order.bankCode;
+        delete order.vAccount;
+        delete order.expireDate;
       }
 
       // 每次付款嘗試配一組新的交易編號，取消後重試才不會被綠界擋成重複

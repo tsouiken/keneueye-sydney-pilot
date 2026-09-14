@@ -65,7 +65,12 @@
   // 只查一次就會停在「尚未收到付款」不動。所以要輪詢等通知進來。
   var MAX_TRIES = 10;
   var INTERVAL_MS = 3000;
+  // 拿到虛擬帳號之後不能停止查詢：轉帳可能是幾分鐘也可能是幾小時之後，
+  // 而頁面上寫著「入帳後自動解鎖」。停掉就變成頁面一直卡在「ATM 待付款」，
+  // 客人得自己重新整理才看得到報告。改成慢速續查，頁面開著就一直等。
+  var ATM_INTERVAL_MS = 15000;
   var tries = 0;
+  var atmWatching = false;
 
   function renderPaid() {
     icon.className = 'status-icon ok';
@@ -100,6 +105,24 @@
     desc.textContent = '如果你剛完成付款，銀行端可能還在處理。稍等一下再重新整理這一頁。';
   }
 
+  // 慢速續查：只認「付款完成」，其餘一律再等。查詢失敗也繼續，
+  // 因為網路斷一下不代表這筆沒了。tries 不再累加，MAX_TRIES 管不到這裡。
+  function watchAtm() {
+    if (atmWatching) return;
+    atmWatching = true;
+    (function loop() {
+      setTimeout(function () {
+        fetch(lookup)
+          .then(function (r) { return r.status === 404 ? null : r.json(); })
+          .then(function (d) {
+            if (d && d.status === 'paid') return renderPaid();
+            loop();
+          })
+          .catch(loop);
+      }, ATM_INTERVAL_MS);
+    })();
+  }
+
   function poll() {
     tries += 1;
     fetch(lookup)
@@ -110,7 +133,10 @@
       .then(function (d) {
         if (d === null) return notFound();
         if (d.status === 'paid') return renderPaid();
-        if (d.status === 'atm_pending' && d.vAccount) return renderAtm(d);
+        if (d.status === 'atm_pending' && d.vAccount) {
+          renderAtm(d);
+          return watchAtm();
+        }
 
         if (tries >= MAX_TRIES) {
           // ATM 但一直沒拿到帳號，也是要講清楚，不能停在「確認付款中」

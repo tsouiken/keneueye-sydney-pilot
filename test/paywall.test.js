@@ -1090,3 +1090,72 @@ test('open 案件換照片：舊檔要刪掉，磁碟上只留最後一張', asy
   const rep = await fetch(BL + `/api/report?order=${orderId}&token=${token}`).then((r) => r.json());
   assert.strictEqual('/uploads/' + files[0], rep.photo, '留下的就是指標指到的那張');
 });
+
+// 第十輪：綠界的 ExpireDate 是台灣日曆日，用主機時區解讀會晚 8 小時到期。
+// 直接測 lib 的純函式，注入時間，才不會變成「一天只有幾小時測得到」的閒置測試。
+test('ATM 期限：用綠界的時區（台灣）判斷那天結束，不是主機時區', () => {
+  const ecpay = require('../lib/ecpay.js');
+
+  // 2026-09-20 的台灣日終 = 23:59:59 +08:00 = 15:59:59Z
+  const deadline = ecpay.atmExpireDeadline('2026/09/20');
+  assert.strictEqual(new Date(deadline).toISOString(), '2026-09-20T15:59:59.000Z',
+    '台灣日終要換算成對的 UTC 瞬間');
+
+  assert.strictEqual(ecpay.atmExpired('2026/09/20', Date.parse('2026-09-20T15:59:00Z')), false,
+    '台灣日終之前還沒過期');
+  assert.strictEqual(ecpay.atmExpired('2026/09/20', Date.parse('2026-09-20T16:00:30Z')), true,
+    '台灣日終之後就是過期了');
+
+  // 修正前的寫法在 UTC 主機上會算成 2026-09-20T23:59:59Z，
+  // 也就是台灣已經 09-21 早上八點還當它有效。這一段就是要釘住那 8 小時。
+  assert.strictEqual(ecpay.atmExpired('2026/09/20', Date.parse('2026-09-20T20:00:00Z')), true,
+    '台灣時間已經是隔天清晨，帳號早就收不了錢，不能還算有效');
+
+  // 破折號格式與讀不出來的值
+  assert.strictEqual(ecpay.atmExpired('2026-09-20', Date.parse('2026-09-20T16:00:30Z')), true);
+  assert.strictEqual(ecpay.atmExpired('', Date.now()), false, '讀不出期限就當作仍有效');
+});
+
+test('ATM 過期後重開一筆：舊的虛擬帳號要清掉，不能讓客人照著過期帳號轉帳', async (t) => {
+  const DA = fs.mkdtempSync(path.join(os.tmpdir(), 'kec-atmexp-'));
+  const token = 'a'.repeat(48);
+  fs.writeFileSync(path.join(DA, 'orders.json'), JSON.stringify({
+    KC20260101000000021: {
+      id: 'KC20260101000000021', token, result: 'soft', amount: 499,
+      status: 'atm_pending', contact: 'line:ken',
+      answers: { q1: 'a' }, photo: '/uploads/x.png',
+      preview: 'p', full: 'f',
+      bankCode: '013', vAccount: '9990001234567', expireDate: '2020/01/01',
+      paymentRefs: ['KP20200101000000aaaa'], activePaymentRef: 'KP20200101000000aaaa',
+      createdAt: '2020-01-01T00:00:00.000Z'
+    }
+  }, null, 2));
+  const __ca = startServer({
+    DATA_DIR: DA, ADMIN_TOKEN, BASE_URL: 'https://example.com',
+    ECPAY_MERCHANT_ID: '2000132', ECPAY_HASH_KEY: '5294y06JbISpM5x9', ECPAY_HASH_IV: 'v77hoKGq4kWxNNIS'
+  });
+  const ca = __ca.child;
+  const BA = await __ca.ready;
+  t.after(() => { ca.kill(); fs.rmSync(DA, { recursive: true, force: true }); });
+
+  const again = await fetch(BA + '/api/order', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orderId: 'KC20260101000000021', token })
+  }).then(async (r) => ({ status: r.status, json: await r.json() }));
+  assert.strictEqual(again.status, 200, '期限過了就該讓人重開一筆');
+  assert.ok(again.json.formFields.MerchantTradeNo, '要拿到新的交易編號');
+
+  // 關鍵：查詢時不能再看到那組過期帳號，否則 success.html 會把它印出來叫人轉帳
+  const rep = await fetch(`${BA}/api/report?order=KC20260101000000021&token=${token}`)
+    .then((r) => r.json());
+  assert.notStrictEqual(rep.status, 'atm_pending', '重開之後狀態要退回等付款，不是還在等轉帳');
+  assert.ok(!rep.vAccount, '過期的虛擬帳號不能還被回報出去');
+
+  // 但也不能就這樣人間蒸發：對帳時要查得到它存在過
+  const onDisk = JSON.parse(fs.readFileSync(path.join(DA, 'orders.json'), 'utf8'));
+  const o = onDisk.KC20260101000000021;
+  assert.strictEqual(o.vAccount, undefined);
+  assert.strictEqual(o.expireDate, undefined);
+  assert.strictEqual(o.expiredAtms.length, 1, '被取代的那組要留檔');
+  assert.strictEqual(o.expiredAtms[0].vAccount, '9990001234567');
+});
