@@ -138,26 +138,46 @@
     track('cta_click', { top: t0.key });
   });
 
+  // 只有真正複製成功才回報「已複製」；失敗時給手動複製回退，避免假成功
+  function copyInvite(text, successMsg) {
+    function manual() {
+      try { prompt('把這段文字手動複製下來：', text); } catch (_) {}
+    }
+    if (navigator.share) {
+      navigator.share({ title: '董事會 PK', text: text, url: location.origin + '/quiz/' }).catch(function () {});
+      return; // 系統分享面板本身就是回饋，不需再提示
+    }
+    var done = function () { alert(successMsg); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, manual);
+      return;
+    }
+    if (document.execCommand) {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (_) {}
+      document.body.removeChild(ta);
+      if (ok) { done(); return; }
+      manual();
+      return;
+    }
+    manual();
+  }
+
   document.getElementById('btn-share').addEventListener('click', function () {
     track('share', { top: t0.key });
-    var text = '我的董事會正由「' + roleName(t0) + '」主導。你也來看看，現在是誰在替你開會？';
-    if (navigator.share) {
-      navigator.share({ text: text, url: location.origin + '/quiz/' }).catch(function () {});
-    } else {
-      try { navigator.clipboard.writeText(text + ' ' + location.origin + '/quiz/'); } catch (_) {}
-      alert('已複製邀請文字，貼給朋友就行。');
-    }
+    copyInvite('我的董事會正由「' + roleName(t0) + '」主導。你也來看看，現在是誰在替你開會？ ' + location.origin + '/quiz/', '已複製邀請文字，貼給朋友就行。');
   });
 
   document.getElementById('btn-pk').addEventListener('click', function () {
     track('pk_start', { top: t0.key });
-    var text = '我開會的人馬是「' + roleName(t0) + '」，你敢不敢跟我對決？來玩：';
-    if (navigator.share) {
-      navigator.share({ title: '董事會 PK', text: text, url: location.origin + '/quiz/' }).catch(function () {});
-    } else {
-      try { navigator.clipboard.writeText(text + ' ' + location.origin + '/quiz/'); } catch (_) {}
-      alert('已複製邀請，朋友玩完就能跟你比誰在開會。');
-    }
+    copyInvite('我開會的人馬是「' + roleName(t0) + '」，你敢不敢跟我對決？來玩： ' + location.origin + '/quiz/', '已複製邀請，朋友玩完就能跟你比誰在開會。');
   });
 })();
 </script>
