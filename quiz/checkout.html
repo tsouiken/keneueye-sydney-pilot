@@ -49,27 +49,30 @@
   'use strict';
   var params = new URLSearchParams(location.search);
   var dim = params.get('r') || '';
-  var fromBoard = params.get('from') === 'board';
-  var orderId = null;
-  var token = null;
+  var orderId = params.get('order') || '';
+  var token = params.get('token') || '';
 
   var recap = document.getElementById('recap');
-  var boardResult = null;
-  try { boardResult = JSON.parse(localStorage.getItem('zw_result')); } catch (_) {}
-  var boardLabel = null;
-  var boardPayload = null;
-  if (fromBoard && boardResult && boardResult.top && boardResult.top.length) {
-    var roleNames = boardResult.top.map(function (s) { return s.role; });
-    boardLabel = '董事會：' + roleNames.join('、');
-    boardPayload = {
-      top: boardResult.top.map(function (s) { return { key: s.key, role: s.role }; }),
-      bars: boardResult.bars || null
-    };
-    recap.innerHTML = '你的董事會核心：<strong>' + roleNames.join('、') + '</strong>。解鎖後會針對你的眉眼結構做完整校準分析。';
-  } else if (dim && window.QuizLogic && QuizLogic.RESULTS && QuizLogic.RESULTS[dim]) {
-    recap.innerHTML = '你的測驗結果：<strong>' + QuizLogic.RESULTS[dim].title + '</strong> 被低估';
+  if (!orderId || !token) {
+    recap.textContent = '這一頁需要從你的報告頁進來，網址要帶案件編號與存取碼。';
+    var bp = document.getElementById('btn-pay');
+    if (bp) { bp.disabled = true; bp.textContent = '無法付款'; }
   } else {
-    recap.innerHTML = '完成董事會後，可在此解鎖你的完整報告。';
+    // 案件編號來自網址，不能直接塞進 innerHTML
+    recap.textContent = '案件編號：';
+    var strong = document.createElement('strong');
+    strong.textContent = orderId;
+    recap.appendChild(strong);
+    // 從董事會來的：把角色帶進來當 recap（只用角色名，不用其他名稱）
+    var boardResult = null;
+    try { boardResult = JSON.parse(localStorage.getItem('zw_result')); } catch (_) {}
+    if (boardResult && boardResult.top && boardResult.top.length) {
+      var br = document.createElement('div');
+      br.style.marginTop = '8px';
+      br.textContent = '你的董事會核心：' + boardResult.top.map(function (s) { return s.role; }).join('、') +
+        '。解鎖後會針對你的眉眼結構做完整校準分析。';
+      recap.appendChild(br);
+    }
   }
 
   var btnPay = document.getElementById('btn-pay');
@@ -77,24 +80,54 @@
   var demoBox = document.getElementById('demo-box');
   var ecpayForm = document.getElementById('ecpay-form');
 
+  // 伺服器擋不住「兩個分頁各送一次綠界表單」：綠界先扣款才回傳，第二筆
+  // 只能事後記成重複付款退款。所以在送出前先問一次，這是唯一能提前擋的點。
+  var PAY_KEY = 'kec_pay_' + orderId;
+  function recentlyStartedPayment() {
+    try {
+      var ts = Number(localStorage.getItem(PAY_KEY) || 0);
+      return ts && (Date.now() - ts) < 15 * 60 * 1000;
+    } catch (_) { return false; }
+  }
+  function markPaymentStarted() {
+    try { localStorage.setItem(PAY_KEY, String(Date.now())); } catch (_) {}
+  }
+
   btnPay.addEventListener('click', function () {
+    if (recentlyStartedPayment() &&
+        !confirm('你在 15 分鐘內已經開始過一次付款。如果那一次已經完成，再付一次會被扣兩筆錢。還是要繼續嗎？')) {
+      return;
+    }
     btnPay.disabled = true;
     btnPay.textContent = '建立訂單中…';
     fetch('/api/order', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ result: boardLabel || (fromBoard ? '董事會' : dim), board: boardPayload })
+      body: JSON.stringify({ orderId: orderId, token: token })
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        orderId = data.orderId;
-        token = data.token || '';
+        // 已經有一組還沒過期的 ATM 帳號：不要再開第二筆，
+        // 直接帶回付款頁看帳號，兩組都入帳就是收了兩次錢。
+        if (data.status === 'atm_pending' && data.vAccount) {
+          location.href = 'success.html?order=' + encodeURIComponent(orderId) +
+            '&token=' + encodeURIComponent(token);
+          return;
+        }
+        // 已付款：不再開新嘗試，直接帶去看報告
+        if (data.status === 'paid') {
+          location.href = 'report.html?order=' + encodeURIComponent(orderId) +
+            '&token=' + encodeURIComponent(token);
+          return;
+        }
+        if (data.error) throw new Error(data.error);
         if (data.demo) {
           demoBox.style.display = 'block';
           btnPay.style.display = 'none';
           return;
         }
         // 真實金流：自動送出綠界付款表單
+        markPaymentStarted();
         ecpayForm.action = data.formAction;
         Object.keys(data.formFields).forEach(function (k) {
           var input = document.createElement('input');
@@ -105,10 +138,10 @@
         });
         ecpayForm.submit();
       })
-      .catch(function () {
+      .catch(function (err) {
         btnPay.disabled = false;
         btnPay.textContent = '前往付款';
-        alert('建立訂單失敗，請稍後再試。');
+        alert(err.message || '建立訂單失敗，請稍後再試。');
       });
   });
 

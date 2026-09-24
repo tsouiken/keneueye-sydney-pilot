@@ -18,6 +18,9 @@ const PUBLIC_FILES = [
   'quiz/quiz-data.js',
   'quiz/quiz-logic.js',
   'quiz/track.js',
+  'quiz/submit.html',
+  'quiz/report.html',
+  'quiz/admin.html',
 ];
 const BANNED_TERMS = ['紫微', '八字', '流年', '宮位', '主星', '命盤', '保證', '一定', '註定', '100%', '招財', '桃花'];
 

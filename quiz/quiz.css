@@ -422,3 +422,56 @@ h2 {
   margin-bottom: 8px;
 }
 .deep-read p { font-size: 14px; color: #5c564a; margin-bottom: 18px; }
+
+/* ===== 結果式付費頁面（submit / report / checkout）共用 ===== */
+.text-input {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--card);
+  font-size: 15px;
+  color: var(--ink);
+  font-family: inherit;
+}
+.text-input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+.report-body {
+  margin: 24px 0 8px;
+}
+.report-body p {
+  font-size: 15px;
+  line-height: 1.9;
+  color: #4a463c;
+  margin-bottom: 16px;
+}
+
+.paywall {
+  margin-top: 28px;
+  padding: 24px 22px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  /* 上緣淡出，暗示上面那段是接續的 */
+  position: relative;
+}
+.paywall::before {
+  content: "";
+  position: absolute;
+  top: -56px;
+  left: 0;
+  right: 0;
+  height: 56px;
+  background: linear-gradient(to bottom, rgba(250,248,242,0), var(--paper));
+  pointer-events: none;
+}
+.paywall-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--gold-deep);
+  margin-bottom: 14px;
+}
